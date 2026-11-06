@@ -1,10 +1,8 @@
 name: Release
 
-# Push a tag such as v0.1.0 (or v0.2.0-rc.1 for a pre-release):
-#   git tag -a v0.1.0 -m v0.1.0 && git push origin v0.1.0
 on:
   push:
-    tags: ["v*.*.*"]
+    tags: [ "v*.*.*" ]
 
 permissions:
   contents: read
@@ -13,7 +11,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the GitHub release
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,5 +35,4 @@ jobs:
       - name: Announce to the Go module proxy
         env:
           TAG: ${{ github.ref_name }}
-        # Fetching the version through the proxy makes pkg.go.dev index it.
         run: curl -fsS "https://proxy.golang.org/$(go list -m)/@v/${TAG}.info"

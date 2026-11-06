@@ -2,11 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
   schedule:
-    # Mondays: catches new Go releases, new vulnerabilities, and gives the
-    # fuzzers a longer run.
+    # Mondays: catches new Go releases, new vulnerabilities, and gives the fuzzers a longer run.
     - cron: "17 5 * * 1"
   workflow_dispatch:
 
@@ -23,8 +22,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ["1.27.x"] # the minimum in go.mod
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        go: [ "1.27.x" ] # the minimum in go.mod
         include:
           - os: ubuntu-latest
             go: stable
@@ -36,7 +35,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
-          cache: false # no dependencies to cache
+          cache: false
       - run: go vet ./...
       - name: Test
         shell: bash
@@ -103,7 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [FuzzRoundTrip, FuzzParse, FuzzUnmarshal, FuzzUnitsMatchesParseDuration]
+        target: [ FuzzRoundTrip, FuzzParse, FuzzUnmarshal, FuzzUnitsMatchesParseDuration ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
