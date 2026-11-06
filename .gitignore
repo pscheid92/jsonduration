@@ -1,0 +1,11 @@
+# Editors
+.idea/
+.vscode/
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+
+# Note: testdata/fuzz is NOT ignored. Inputs that make a fuzz target fail
+# land there and belong in the repository as regression tests.
