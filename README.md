@@ -5,27 +5,32 @@
 
 JSON for `time.Duration` in Go's `encoding/json/v2`, in the format you choose.
 
-`encoding/json/v2` has no default representation for `time.Duration`
-([golang/go#71631](https://go.dev/issue/71631)): marshaling one fails with
-an error. The `format` struct tag that used to pick one was removed in Go 1.27
-([golang/go#79071](https://go.dev/issue/79071)). This package offers two
-ways to choose a format instead:
-
-- **One option per call** that covers every `time.Duration` in it, so your
-  types stay as they are.
-- **One wrapper type per format**, to choose per field without any options.
-
-It is a small package for `encoding/json/v2` only. `encoding/json` (v1),
-other JSON libraries, and YAML or TOML are out of scope.
+`encoding/json/v2` can't encode a `time.Duration` on its own: it has no
+default representation ([golang/go#71631](https://go.dev/issue/71631)), and
+the `format` struct tag that used to pick one was removed in Go 1.27
+([golang/go#79071](https://go.dev/issue/79071)). This package lets you
+choose one.
 
 ```sh
 go get github.com/pscheid92/jsonduration
 ```
 
-Requires Go 1.27 or later. No dependencies outside the standard library.
-Until v1.0.0 the API may still change.
+It requires Go 1.27 or later, has no dependencies outside the standard
+library, and supports `encoding/json/v2` only. Until v1.0.0 the API may
+still change.
 
-## One format for a whole call
+## Usage
+
+There are two ways to choose a format:
+
+- **One option per call**, if you call `json.Marshal` and `json.Unmarshal`
+  yourself. It covers every `time.Duration` in the call, and your types stay
+  as they are.
+- **One wrapper type per field**, if you can't pass options, for example
+  because another library encodes your types, or if fields need different
+  formats.
+
+### One option per call
 
 ```go
 import (
@@ -37,23 +42,26 @@ import (
 
 type Config struct {
 	Timeout time.Duration   `json:"timeout"`
-	Retry   []time.Duration `json:"retry"`
+	Retries []time.Duration `json:"retries"`
 }
 
 opts := jsonduration.With(jsonduration.ISO8601)
 
-b, err := json.Marshal(Config{Timeout: 90 * time.Second}, opts)
-// {"timeout":"PT1M30S","retry":[]}
+b, err := json.Marshal(Config{
+	Timeout: 90 * time.Second,
+	Retries: []time.Duration{time.Second, 5 * time.Second},
+}, opts)
+// {"timeout":"PT1M30S","retries":["PT1S","PT5S"]}
 
 var cfg Config
 err = json.Unmarshal([]byte(`{"timeout":"PT2M"}`), &cfg, opts)
 ```
 
-The format applies to struct fields, pointers, slices, arrays, map keys and
-values. The options are safe for concurrent use, so create them once and
-share them.
+The format applies to fields, pointers, slices, arrays, and map keys and
+values. Create the options once and share them: they are safe for concurrent
+use.
 
-## One format per field
+### One wrapper type per field
 
 ```go
 type Config struct {
@@ -66,15 +74,10 @@ b, err := json.Marshal(Config{
 	Backoff: jsonduration.SecDuration{Duration: 1500 * time.Millisecond},
 })
 // {"timeout":"PT1M30S","backoff":1.5}
-
-var cfg Config
-err = json.Unmarshal(b, &cfg)
-cfg.Timeout.Minutes()          // the methods of time.Duration still work
-time.Sleep(cfg.Backoff.Duration)
 ```
 
-Wrapper types embed `time.Duration` and implement `json.MarshalerTo` and
-`json.UnmarshalerFrom`. `With` does not change their format.
+Wrapper types embed `time.Duration`, so its methods keep working, as in
+`cfg.Timeout.Minutes()` or `time.Sleep(cfg.Backoff.Duration)`.
 
 ## Formats
 
@@ -89,27 +92,45 @@ Wrapper types embed `time.Duration` and implement `json.MarshalerTo` and
 | `Base60`    | `base60`    | `Base60Duration`    | string    | `"1:30:00.5"`   |
 | `ProtoJSON` | `protojson` | `ProtoJSONDuration` | string    | `"5400.500s"`   |
 
-- The first six keep the names and the exact output of the formats
-  `encoding/json/v2` offered through `format` before Go 1.27, so they can be
-  carried over without changing any JSON.
-- `Nano` is byte-for-byte what `encoding/json` (v1) writes.
-- `Sec`, `Milli` and `Micro` are exact decimal numbers. They never go through
-  `float64`.
+- If you used the `format` tag before Go 1.27, the first six write exactly
+  the JSON they wrote then.
+- `Nano` writes what `encoding/json` (v1) writes.
+- Numeric formats are exact. They are never rounded.
 - `ProtoJSON` is the protobuf JSON mapping of `google.protobuf.Duration`.
-- Numeric formats become JSON strings where JSON needs one (object names)
-  and when `json.StringifyNumbers` is set.
 
-The codecs are also available without JSON:
+## Common tasks
+
+### Migrating between formats
+
+Write one format, but read others too:
 
 ```go
-jsonduration.ProtoJSON.Format(1500 * time.Millisecond) // "1.500s"
-d, err := jsonduration.Base60.Parse("1:30:00.5")         // 1h30m0.5s
+// Stored data holds encoding/json (v1) nanoseconds; new data is ISO 8601.
+opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AlsoAccept(jsonduration.Nano))
 ```
 
-A `Format` can be chosen at run time. It implements `MarshalText` and
-`UnmarshalText`, so a format in a JSON configuration is checked while it is
-decoded, and it works with `flag.TextVar`. The names in the table must match
-exactly (`iso8601`, not `ISO8601`), and anything else is rejected with an
+Both `{"timeout":90000000000}` and `{"timeout":"PT1M30S"}` decode to 1m30s,
+and everything is written as ISO 8601. You can accept several string formats,
+but only one numeric format, because a number such as `90` could be seconds
+or nanoseconds.
+
+### ISO 8601 days
+
+`ISO8601` rejects days, weeks, months and years, because a calendar day is
+not always 24 hours long. If the other side means exactly 24 hours by a day,
+as Java's `Duration.parse` does, add `AcceptDays`:
+
+```go
+opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AcceptDays())
+// "P1DT12H" decodes to 36h
+```
+
+Months and years are still rejected, and output never uses days.
+
+### Choosing the format at run time
+
+`Format` works with `flag.TextVar` and in JSON configuration. Names must
+match the table exactly (`iso8601`, not `ISO8601`), and anything else is an
 error that lists them:
 
 ```go
@@ -119,110 +140,57 @@ flag.Parse()
 opts := jsonduration.With(format)
 ```
 
-A `Format` converted from a plain string is not checked, and `With` panics
-on an invalid one. Check it with `Valid` first:
+A `Format` converted from a plain string, as in
+`jsonduration.Format(os.Getenv("DURATION_FORMAT"))`, is not checked, and
+`With` panics on an invalid one. Check it with `Valid()` first.
+
+### Without JSON
 
 ```go
-format := jsonduration.Format(os.Getenv("DURATION_FORMAT"))
-if !format.Valid() {
-	return fmt.Errorf("unknown duration format %q", format)
-}
+jsonduration.ProtoJSON.Format(1500 * time.Millisecond) // "1.500s"
+d, err := jsonduration.Base60.Parse("1:30:00.5")         // 1h30m0.5s
 ```
-
-## Migrating between formats
-
-Write one format, but read others too:
-
-```go
-// Stored data holds encoding/json (v1) nanoseconds; new data is ISO 8601.
-opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AlsoAccept(jsonduration.Nano))
-```
-
-`{"timeout":90000000000}` and `{"timeout":"PT1M30S"}` both decode to 1m30s,
-and everything is written as ISO 8601. Old and new data can even be mixed in
-one document.
-
-At most one numeric format can be involved, because a number such as `90`
-could be seconds or nanoseconds. `With` panics if you name two. String
-formats never conflict: no text is valid in two of them with different
-values. Where two accept the same text, such as `"1.5s"` in `Units` and
-`ProtoJSON`, they agree on it. A fuzz test checks exactly this.
-
-## Decoding is strict
-
-- Only the configured formats are accepted. There is no guessing.
-- `ISO8601` rejects years, months, weeks and days with `ErrNominalUnits`,
-  since they have no fixed length.
-- Where a producer means exactly 24 hours by a day, as Java's
-  `Duration.parse` does, the `AcceptDays()` option to `With` reads
-  `"P1DT12H"` as 36 hours and a week as 7 days. Years and months are still
-  rejected, output never uses days, and `Parse` and the wrapper types stay
-  strict.
-- Digits below one nanosecond are truncated toward zero, computed exactly in
-  every format. `Units` accepts exactly what `time.ParseDuration` accepts
-  (a fuzz test compares the two), without going through `float64`.
-- Errors wrap `strconv.ErrSyntax`, `strconv.ErrRange` or `ErrNominalUnits`.
-- `null` sets a duration to zero, as `encoding/json/v2` does for other types.
 
 ## Good to know
 
-- Named types such as `type TTL time.Duration` are different types and are
-  not affected by `With`.
-- A wrapper type reads and writes exactly its own format. To accept several
-  formats on input, use `With` with `AlsoAccept`.
-- Use `omitzero`, not `omitempty`, to leave out zero durations. In v2,
-  `omitempty` only omits values that encode as empty JSON.
+- Decoding is strict: only the formats you configured are accepted. There is
+  no guessing.
+- Named types such as `type TTL time.Duration` are not `time.Duration`, so
+  `With` does not affect them.
+- To leave out zero durations, use the `omitzero` tag option. In v2,
+  `omitempty` keeps them.
 - If you pass your own `json.WithMarshalers`, combine it with
-  `jsonduration.Marshalers` through `json.JoinMarshalers` (the same goes for
-  unmarshalers). A second `WithMarshalers` option replaces the first one.
-- The `string` tag option quotes numeric formats, like `json.StringifyNumbers`,
-  and has no effect on string formats.
+  `jsonduration.Marshalers` through `json.JoinMarshalers`, and likewise for
+  unmarshalers. A second `WithMarshalers` option replaces the first one.
 
 ## Alternatives
 
-- **The `json.FormatDurationAsNano` option** from `encoding/json`, passed to
-  v2: nanoseconds only, as `encoding/json` (v1) writes them.
-- **`github.com/go-json-experiment/json` with `ExperimentalSupportFormatTag`**:
-  the old `format` struct tag, as an option that is explicitly temporary.
+- **`json.FormatDurationAsNano`** from `encoding/json`, passed to v2:
+  nanoseconds only.
+- **`github.com/go-json-experiment/json`** with
+  `ExperimentalSupportFormatTag`: the old `format` tag, as an option that is
+  explicitly temporary.
 - **`tailscale.com/types/jsonformat`**: wrapper types for nanoseconds, Go
-  strings and ISO 8601. It is part of the `tailscale.com` module and says it
-  may be deleted once Go supports formats directly.
-- **`github.com/MarkRosemaker/jsonutil`**: marshal functions for many types,
-  among them durations as whole seconds or Go strings.
-
-This package differs in offering both ways to choose (per call and per
-field), all eight formats, exact decoding, and migration between formats,
-with only the standard library as a dependency.
+  strings and ISO 8601, documented as an intermediate step. It is part of the
+  `tailscale.com` module.
 
 ## Future
 
-Go may add its own way to choose a format for a type: see
+Go may add its own way to choose a format for a type, see
 [golang/go#71664](https://go.dev/issue/71664) and
-[golang/go#81013](https://go.dev/issue/81013), both still open proposals.
-If that lands, prefer it. This package will then point to it in a final
-release. The format names here are the ones Go used, so the move is meant to
-be little more than a rename.
+[golang/go#81013](https://go.dev/issue/81013). If that happens, prefer it.
+A final release of this package will then point to it.
 
 ## Development
 
 Needs [just](https://just.systems) and
-[golangci-lint](https://golangci-lint.run).
+[golangci-lint](https://golangci-lint.run). Run `just` to list all recipes.
 
 ```sh
-just check         # gofmt, vet, golangci-lint, tests with -race, govulncheck
-just fuzz          # every fuzz target for 30s; `just fuzz 2m FuzzParse` for one
-just bench
-just generate      # after changing gen_wrapper_types.go
+just check      # lint, tests with -race, govulncheck
+just fuzz       # every fuzz target for 30s
+just generate   # after changing gen_wrapper_types.go
 ```
-
-The wrapper types in `wrapper_types.go` are generated from the table in
-`gen_wrapper_types.go`. CI fails if the two are out of sync.
-
-CI runs the same checks on Linux, macOS and Windows, fuzzes every push for a
-short time and for longer once a week, and runs `govulncheck` weekly.
-Renovate keeps the pinned GitHub Actions up to date.
-Pushing a tag such as `v0.1.0` creates a GitHub release and announces the
-version to the Go module proxy, so pkg.go.dev picks it up.
 
 ## License
 
