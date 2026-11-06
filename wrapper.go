@@ -4,8 +4,13 @@
 
 package jsonduration
 
-// The wrapper types, one per format, are generated into wrapper_types.go.
-//go:generate go run gen_wrapper_types.go
+import (
+	"encoding/json/jsontext"
+	"time"
+)
+
+// The wrapper types below differ only in their format. TestWrapperTypes
+// checks each against With for its format, so a mix-up between them fails.
 
 // decoders holds a single-format decoder for each format, for the
 // UnmarshalJSONFrom methods of the wrapper types.
@@ -16,3 +21,93 @@ var decoders = func() map[Format]*decoder {
 	}
 	return m
 }()
+
+// UnitsDuration is a [time.Duration] that encodes itself in format [Units]
+// in encoding/json/v2, without any options: as a JSON string such as
+// "1h30m0.5s" for 1h30m0.5s.
+type UnitsDuration struct{ time.Duration }
+
+// MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
+func (d UnitsDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return encode(enc, Units, d.Duration)
+}
+
+// UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
+func (d *UnitsDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return decoders[Units].decode(dec, &d.Duration)
+}
+
+// SecDuration is a [time.Duration] that encodes itself in format [Sec]
+// in encoding/json/v2, without any options: as a JSON number such as
+// 5400.5 for 1h30m0.5s.
+type SecDuration struct{ time.Duration }
+
+// MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
+func (d SecDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return encode(enc, Sec, d.Duration)
+}
+
+// UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
+func (d *SecDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return decoders[Sec].decode(dec, &d.Duration)
+}
+
+// MilliDuration is a [time.Duration] that encodes itself in format [Milli]
+// in encoding/json/v2, without any options: as a JSON number such as
+// 5400500 for 1h30m0.5s.
+type MilliDuration struct{ time.Duration }
+
+// MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
+func (d MilliDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return encode(enc, Milli, d.Duration)
+}
+
+// UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
+func (d *MilliDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return decoders[Milli].decode(dec, &d.Duration)
+}
+
+// MicroDuration is a [time.Duration] that encodes itself in format [Micro]
+// in encoding/json/v2, without any options: as a JSON number such as
+// 5400500000 for 1h30m0.5s.
+type MicroDuration struct{ time.Duration }
+
+// MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
+func (d MicroDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return encode(enc, Micro, d.Duration)
+}
+
+// UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
+func (d *MicroDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return decoders[Micro].decode(dec, &d.Duration)
+}
+
+// NanoDuration is a [time.Duration] that encodes itself in format [Nano]
+// in encoding/json/v2, without any options: as a JSON number such as
+// 5400500000000 for 1h30m0.5s.
+type NanoDuration struct{ time.Duration }
+
+// MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
+func (d NanoDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return encode(enc, Nano, d.Duration)
+}
+
+// UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
+func (d *NanoDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return decoders[Nano].decode(dec, &d.Duration)
+}
+
+// ISO8601Duration is a [time.Duration] that encodes itself in format [ISO8601]
+// in encoding/json/v2, without any options: as a JSON string such as
+// "PT1H30M0.5S" for 1h30m0.5s.
+type ISO8601Duration struct{ time.Duration }
+
+// MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
+func (d ISO8601Duration) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return encode(enc, ISO8601, d.Duration)
+}
+
+// UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
+func (d *ISO8601Duration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return decoders[ISO8601].decode(dec, &d.Duration)
+}

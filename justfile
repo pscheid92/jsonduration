@@ -11,10 +11,6 @@ check: lint test vuln
 fmt:
     gofmt -w .
 
-# Regenerate wrapper_types.go from gen_wrapper_types.go
-generate:
-    go generate ./...
-
 # gofmt, go vet, go mod tidy and golangci-lint
 lint:
     @test -z "$(gofmt -l .)" || { gofmt -l .; echo "run 'just fmt'"; exit 1; }

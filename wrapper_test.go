@@ -36,8 +36,7 @@ func unwrap(p any) time.Duration {
 }
 
 // TestWrapperTypes checks that each wrapper type encodes exactly as With
-// does for its format, which also catches a wrong row in the table of
-// gen_wrapper_types.go.
+// does for its format, which also catches a mix-up between them.
 func TestWrapperTypes(t *testing.T) {
 	if len(wrappers) != len(Formats()) {
 		t.Fatalf("%d wrapper types for %d formats", len(wrappers), len(Formats()))

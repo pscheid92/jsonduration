@@ -193,7 +193,6 @@ Needs [just](https://just.systems) and [golangci-lint](https://golangci-lint.run
 ```sh
 just check      # lint, tests with -race, govulncheck
 just fuzz       # every fuzz target for 30s
-just generate   # after changing gen_wrapper_types.go
 ```
 
 ## License
