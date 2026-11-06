@@ -97,6 +97,7 @@ jobs:
         with:
           go-version-input: stable
           check-latest: true
+          cache: false # no dependencies to cache
 
   fuzz:
     strategy:
