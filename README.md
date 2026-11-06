@@ -116,13 +116,10 @@ Wrapper types embed `time.Duration`, so its methods keep working, as in `cfg.Tim
 | `Micro`     | `micro`     | `MicroDuration`     | number    | `5400500000`    |
 | `Nano`      | `nano`      | `NanoDuration`      | number    | `5400500000000` |
 | `ISO8601`   | `iso8601`   | `ISO8601Duration`   | string    | `"PT1H30M0.5S"` |
-| `Base60`    | `base60`    | `Base60Duration`    | string    | `"1:30:00.5"`   |
-| `ProtoJSON` | `protojson` | `ProtoJSONDuration` | string    | `"5400.500s"`   |
 
-- If you used the `format` tag before Go 1.27, the first six write the same JSON as they did then.
+- These are the six formats the `format` tag offered before Go 1.27, and they write the same JSON as they did then.
 - `Nano` writes what `encoding/json` (v1) writes.
 - Numeric formats are not rounded.
-- `ProtoJSON` is the protobuf JSON mapping of `google.protobuf.Duration`.
 
 ## Common tasks
 
@@ -169,8 +166,8 @@ A `Format` converted from a plain string, as in `jsonduration.Format(os.Getenv("
 ### Without JSON
 
 ```go
-jsonduration.ProtoJSON.Format(1500 * time.Millisecond) // "1.500s"
-d, err := jsonduration.Base60.Parse("1:30:00.5")       // 1h30m0.5s
+jsonduration.ISO8601.Format(90 * time.Second) // "PT1M30S"
+d, err := jsonduration.Sec.Parse("5400.5")    // 1h30m0.5s
 ```
 
 ## Good to know

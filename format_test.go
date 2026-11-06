@@ -56,22 +56,6 @@ func TestFormat(t *testing.T) {
 		{ISO8601, -time.Minute, "-PT1M"},
 		{ISO8601, maxD, "PT2562047H47M16.854775807S"},
 		{ISO8601, minD, "-PT2562047H47M16.854775808S"},
-
-		{Base60, 0, "0:00:00"},
-		{Base60, d90, "1:30:00.5"},
-		{Base60, -time.Second, "-0:00:01"},
-		{Base60, 100 * time.Hour, "100:00:00"},
-		{Base60, maxD, "2562047:47:16.854775807"},
-		{Base60, minD, "-2562047:47:16.854775808"},
-
-		{ProtoJSON, 0, "0s"},
-		{ProtoJSON, time.Nanosecond, "0.000000001s"},
-		{ProtoJSON, 1500 * time.Millisecond, "1.500s"},
-		{ProtoJSON, 1500 * time.Microsecond, "0.001500s"},
-		{ProtoJSON, -1500 * time.Millisecond, "-1.500s"},
-		{ProtoJSON, d90, "5400.500s"},
-		{ProtoJSON, maxD, "9223372036.854775807s"},
-		{ProtoJSON, minD, "-9223372036.854775808s"},
 	}
 	for _, tt := range tests {
 		got := tt.f.Format(tt.d)
@@ -137,29 +121,6 @@ func TestParse(t *testing.T) {
 		{ISO8601, "PT1X", 0, strconv.ErrSyntax},
 		{ISO8601, "PT2562048H", 0, strconv.ErrRange},
 		{ISO8601, "-PT2562047H47M16.854775809S", 0, strconv.ErrRange},
-
-		// Base-60.
-		{Base60, "0:00:00.000000001", time.Nanosecond, nil},
-		{Base60, "-1:00:00", -time.Hour, nil},
-		{Base60, "01:00:00", 0, strconv.ErrSyntax},
-		{Base60, "1:5:00", 0, strconv.ErrSyntax},
-		{Base60, "1:60:00", 0, strconv.ErrSyntax},
-		{Base60, "1:00:60", 0, strconv.ErrSyntax},
-		{Base60, "1:00", 0, strconv.ErrSyntax},
-		{Base60, "1:00:00.", 0, strconv.ErrSyntax},
-		{Base60, "+1:00:00", 0, strconv.ErrSyntax},
-		{Base60, "2562048:00:00", 0, strconv.ErrRange},
-
-		// Protobuf JSON.
-		{ProtoJSON, "1s", time.Second, nil},
-		{ProtoJSON, "1.5s", 1500 * time.Millisecond, nil},
-		{ProtoJSON, "-0.000000001s", -time.Nanosecond, nil},
-		{ProtoJSON, "1", 0, strconv.ErrSyntax},
-		{ProtoJSON, "1S", 0, strconv.ErrSyntax},
-		{ProtoJSON, "s", 0, strconv.ErrSyntax},
-		{ProtoJSON, "1.0000000001s", 0, strconv.ErrSyntax},
-		{ProtoJSON, "+1s", 0, strconv.ErrSyntax},
-		{ProtoJSON, "9223372037s", 0, strconv.ErrRange},
 
 		// Units: the grammar of time.ParseDuration, with exact fractions.
 		{Units, "1h30m", 90 * time.Minute, nil},
@@ -264,7 +225,7 @@ func TestFormatText(t *testing.T) {
 
 	// Names match exactly, so other spellings are rejected, and the error
 	// lists the names. A failed decoding leaves the format unchanged.
-	const names = "units, sec, milli, micro, nano, iso8601, base60, protojson"
+	const names = "units, sec, milli, micro, nano, iso8601"
 	for _, in := range []string{"bogus", "ISO8601", "Nano", " sec", ""} {
 		g := Sec
 		err := g.UnmarshalText([]byte(in))

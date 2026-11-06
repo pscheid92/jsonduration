@@ -100,33 +100,3 @@ func (d ISO8601Duration) MarshalJSONTo(enc *jsontext.Encoder) error {
 func (d *ISO8601Duration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	return decoders[ISO8601].decode(dec, &d.Duration)
 }
-
-// Base60Duration is a [time.Duration] that encodes itself in format [Base60]
-// in encoding/json/v2, without any options: as a JSON string such as
-// "1:30:00.5" for 1h30m0.5s.
-type Base60Duration struct{ time.Duration }
-
-// MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
-func (d Base60Duration) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return encode(enc, Base60, d.Duration)
-}
-
-// UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
-func (d *Base60Duration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	return decoders[Base60].decode(dec, &d.Duration)
-}
-
-// ProtoJSONDuration is a [time.Duration] that encodes itself in format [ProtoJSON]
-// in encoding/json/v2, without any options: as a JSON string such as
-// "5400.500s" for 1h30m0.5s.
-type ProtoJSONDuration struct{ time.Duration }
-
-// MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
-func (d ProtoJSONDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return encode(enc, ProtoJSON, d.Duration)
-}
-
-// UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
-func (d *ProtoJSONDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	return decoders[ProtoJSON].decode(dec, &d.Duration)
-}

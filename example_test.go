@@ -89,8 +89,6 @@ func ExampleFormat_Format() {
 	// micro     5400500000
 	// nano      5400500000000
 	// iso8601   PT1H30M0.5S
-	// base60    1:30:00.5
-	// protojson 5400.500s
 }
 
 func ExampleFormat_Parse() {

@@ -30,8 +30,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -------------------------------------------------------------------------------
 
 Parts of format.go are adapted from encoding/json/v2 in the Go standard
-library and from github.com/go-json-experiment/json. That code is covered by
-the following notice:
+library. That code is covered by the following notice:
 
 Copyright 2009 The Go Authors.
 

@@ -37,14 +37,12 @@ func samplePayload() payload {
 
 func TestMarshal(t *testing.T) {
 	tests := map[Format]string{
-		Units:     `{"ttl":"1h30m0.5s","ptr":"1h30m0.5s","list":["1s","-1ms"],"keys":{"1m0s":"1h0m0s"},"any":"1h0m0s"}`,
-		Sec:       `{"ttl":5400.5,"ptr":5400.5,"list":[1,-0.001],"keys":{"60":3600},"any":3600}`,
-		Milli:     `{"ttl":5400500,"ptr":5400500,"list":[1000,-1],"keys":{"60000":3600000},"any":3600000}`,
-		Micro:     `{"ttl":5400500000,"ptr":5400500000,"list":[1000000,-1000],"keys":{"60000000":3600000000},"any":3600000000}`,
-		Nano:      `{"ttl":5400500000000,"ptr":5400500000000,"list":[1000000000,-1000000],"keys":{"60000000000":3600000000000},"any":3600000000000}`,
-		ISO8601:   `{"ttl":"PT1H30M0.5S","ptr":"PT1H30M0.5S","list":["PT1S","-PT0.001S"],"keys":{"PT1M":"PT1H"},"any":"PT1H"}`,
-		Base60:    `{"ttl":"1:30:00.5","ptr":"1:30:00.5","list":["0:00:01","-0:00:00.001"],"keys":{"0:01:00":"1:00:00"},"any":"1:00:00"}`,
-		ProtoJSON: `{"ttl":"5400.500s","ptr":"5400.500s","list":["1s","-0.001s"],"keys":{"60s":"3600s"},"any":"3600s"}`,
+		Units:   `{"ttl":"1h30m0.5s","ptr":"1h30m0.5s","list":["1s","-1ms"],"keys":{"1m0s":"1h0m0s"},"any":"1h0m0s"}`,
+		Sec:     `{"ttl":5400.5,"ptr":5400.5,"list":[1,-0.001],"keys":{"60":3600},"any":3600}`,
+		Milli:   `{"ttl":5400500,"ptr":5400500,"list":[1000,-1],"keys":{"60000":3600000},"any":3600000}`,
+		Micro:   `{"ttl":5400500000,"ptr":5400500000,"list":[1000000,-1000],"keys":{"60000000":3600000000},"any":3600000000}`,
+		Nano:    `{"ttl":5400500000000,"ptr":5400500000000,"list":[1000000000,-1000000],"keys":{"60000000000":3600000000000},"any":3600000000000}`,
+		ISO8601: `{"ttl":"PT1H30M0.5S","ptr":"PT1H30M0.5S","list":["PT1S","-PT0.001S"],"keys":{"PT1M":"PT1H"},"any":"PT1H"}`,
 	}
 	for _, f := range Formats() {
 		want, ok := tests[f]
@@ -114,7 +112,7 @@ func TestUnmarshalStrict(t *testing.T) {
 		{ISO8601, `{"D":"P1D"}`, "nominal"},                     // nominal units
 		{Nano, `{"D":true}`, "must be a JSON number"},           // wrong kind
 		{Nano, `{"D":1e3}`, "invalid duration"},                 // exponent
-		{ProtoJSON, `{"D":"1.5"}`, "invalid protobuf duration"}, // missing suffix
+		{Units, `{"D":"1.5"}`, "missing unit"},                  // a number without a unit
 		{Sec, `{"D":99999999999}`, "value out of range"},        // overflow
 	}
 	for _, tt := range tests {
@@ -162,13 +160,13 @@ func TestJoinWithOwnMarshalers(t *testing.T) {
 
 func TestEncoderStreaming(t *testing.T) {
 	var sb strings.Builder
-	enc := jsontext.NewEncoder(&sb, With(ProtoJSON))
+	enc := jsontext.NewEncoder(&sb, With(ISO8601))
 	for _, d := range []time.Duration{time.Second, 1500 * time.Millisecond} {
 		if err := json.MarshalEncode(enc, d); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := sb.String(); got != "\"1s\"\n\"1.500s\"\n" {
+	if got := sb.String(); got != "\"PT1S\"\n\"PT1.5S\"\n" {
 		t.Errorf("got %q", got)
 	}
 }
@@ -226,12 +224,8 @@ func TestAlsoAccept(t *testing.T) {
 		t.Errorf("Marshal = %s, %v; want %s", b, err, want)
 	}
 
-	// Units and ProtoJSON overlap and agree.
-	var d time.Duration
-	if err := json.Unmarshal([]byte(`"1.500s"`), &d, With(Units, AlsoAccept(ProtoJSON))); err != nil || d != 1500*time.Millisecond {
-		t.Errorf("Units+ProtoJSON: %v, %v", d, err)
-	}
 	// A numeric format is a JSON string with StringifyNumbers.
+	var d time.Duration
 	if err := json.Unmarshal([]byte(`"5400.5"`), &d, With(Units, AlsoAccept(Sec)), json.StringifyNumbers(true)); err != nil || d != d90 {
 		t.Errorf("Units+Sec stringified: %v, %v", d, err)
 	}

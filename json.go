@@ -109,12 +109,15 @@ func AcceptDays() DecodeOption {
 //	// Stored data holds v1 nanoseconds; new data is written as ISO 8601.
 //	opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AlsoAccept(jsonduration.Nano))
 //
-// String formats never conflict: no text is valid in two of them with
-// different values. Where two accept the same text, such as "1.5s" in
-// [Units] and [ProtoJSON], they agree on its value. Numeric formats do
-// conflict, since a JSON number such as 90 could be seconds or
-// nanoseconds, so at most one numeric format may be involved. [With] and
-// [Unmarshalers] panic if there are two, or if a format is not valid.
+// The two string formats, [Units] and [ISO8601], never conflict: no text
+// is valid in both. Numeric formats do conflict, since a JSON number such
+// as 90 could be seconds or nanoseconds, so at most one numeric format may
+// be involved. [With] and [Unmarshalers] panic if there are two, or if a
+// format is not valid.
+//
+// Accepting more than one format is opt-in on purpose: the
+// encoding/json/v2 working group decided against lax parsing by default,
+// since it can be a request smuggling vector (https://go.dev/issue/71631).
 func AlsoAccept(formats ...Format) DecodeOption {
 	return alsoAccept(formats)
 }

@@ -14,14 +14,12 @@ import (
 
 // wrappers maps each format to its wrapper type.
 var wrappers = map[Format]any{
-	Units:     UnitsDuration{},
-	Sec:       SecDuration{},
-	Milli:     MilliDuration{},
-	Micro:     MicroDuration{},
-	Nano:      NanoDuration{},
-	ISO8601:   ISO8601Duration{},
-	Base60:    Base60Duration{},
-	ProtoJSON: ProtoJSONDuration{},
+	Units:   UnitsDuration{},
+	Sec:     SecDuration{},
+	Milli:   MilliDuration{},
+	Micro:   MicroDuration{},
+	Nano:    NanoDuration{},
+	ISO8601: ISO8601Duration{},
 }
 
 // newWrapper returns a pointer to a new value of the type of like,
@@ -94,7 +92,7 @@ func TestWrapperFields(t *testing.T) {
 		Backoff SecDuration                      `json:"backoff"`
 		Limits  map[ISO8601Duration]NanoDuration `json:"limits"`
 		Steps   map[SecDuration]UnitsDuration    `json:"steps"`
-		Delay   *Base60Duration                  `json:"delay,omitzero"`
+		Delay   *UnitsDuration                   `json:"delay,omitzero"`
 	}
 	c := config{
 		Timeout: ISO8601Duration{90 * time.Second},

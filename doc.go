@@ -36,12 +36,10 @@
 //
 // # Formats
 //
-// The six formats encoding/json/v2 offered through `format` are supported
+// The formats are the six that encoding/json/v2 offered through `format`,
 // with the same names and identical output: [Units], [Sec], [Milli],
 // [Micro], [Nano] and [ISO8601]. [Nano] is byte-for-byte compatible with
-// encoding/json (v1). Two more are supported: [Base60] from the original
-// v2 proposal, and [ProtoJSON], the protobuf JSON mapping of
-// google.protobuf.Duration.
+// encoding/json (v1).
 //
 // A [Format] can come from a JSON configuration or from flags: it
 // implements [encoding.TextUnmarshaler] and rejects anything but the exact

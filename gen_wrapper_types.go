@@ -26,8 +26,6 @@ var types = []struct {
 	{"MicroDuration", "Micro", "number", "5400500000"},
 	{"NanoDuration", "Nano", "number", "5400500000000"},
 	{"ISO8601Duration", "ISO8601", "string", `"PT1H30M0.5S"`},
-	{"Base60Duration", "Base60", "string", `"1:30:00.5"`},
-	{"ProtoJSONDuration", "ProtoJSON", "string", `"5400.500s"`},
 }
 
 var tmpl = template.Must(template.New("").Parse(`// Copyright 2026 Patrick Scheid. All rights reserved.

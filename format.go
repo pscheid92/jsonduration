@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 //
-// The base-10, ISO 8601 and base-60 codecs are adapted from
-// encoding/json/v2/arshal_time.go (Go 1.27.3) and from the base60 support
-// that github.com/go-json-experiment/json removed in commit d3c622f1b8.
-// Those portions are Copyright 2020 The Go Authors; see LICENSE.
+// The base-10 and ISO 8601 codecs are adapted from
+// encoding/json/v2/arshal_time.go (Go 1.27.3). Those portions are
+// Copyright 2020 The Go Authors; see LICENSE.
 
 package jsonduration
 
@@ -60,22 +59,11 @@ const (
 	// with the nominal designators year, month, week or day is rejected,
 	// unless [AcceptDays] allows days and weeks.
 	ISO8601 Format = "iso8601"
-
-	// Base60 is a JSON string in H:MM:SS.SSSSSSSSS notation, e.g. "1:30:00.5".
-	// It was part of the original encoding/json/v2 proposal and was removed
-	// after the vote in https://go.dev/issue/71631.
-	Base60 Format = "base60"
-
-	// ProtoJSON is the JSON string of google.protobuf.Duration:
-	// seconds followed by "s", e.g. "5400.500s". Output has 0, 3, 6 or 9
-	// fractional digits as the protobuf JSON mapping requires; input
-	// accepts 0 to 9 fractional digits.
-	ProtoJSON Format = "protojson"
 )
 
 // Formats returns every supported format, in a new slice on each call.
 func Formats() []Format {
-	return []Format{Units, Sec, Milli, Micro, Nano, ISO8601, Base60, ProtoJSON}
+	return []Format{Units, Sec, Milli, Micro, Nano, ISO8601}
 }
 
 // Valid reports whether f is exactly one of the supported formats, so
@@ -83,7 +71,7 @@ func Formats() []Format {
 // converted from a string before passing it to [With].
 func (f Format) Valid() bool {
 	switch f {
-	case Units, Sec, Milli, Micro, Nano, ISO8601, Base60, ProtoJSON:
+	case Units, Sec, Milli, Micro, Nano, ISO8601:
 		return true
 	}
 	return false
@@ -120,10 +108,6 @@ func (f Format) Append(b []byte, d time.Duration) []byte {
 		return appendDurationBase10(b, d, f.pow10())
 	case ISO8601:
 		return appendDurationISO8601(b, d)
-	case Base60:
-		return appendDurationBase60(b, d)
-	case ProtoJSON:
-		return appendDurationProto(b, d)
 	}
 	panic(fmt.Sprintf("jsonduration: invalid format %q", string(f)))
 }
@@ -152,10 +136,6 @@ func (f Format) parse(b []byte, days bool) (time.Duration, error) {
 		return parseDurationBase10(b, f.pow10())
 	case ISO8601:
 		return parseDurationISO8601(b, days)
-	case Base60:
-		return parseDurationBase60(b)
-	case ProtoJSON:
-		return parseDurationProto(b)
 	}
 	return 0, fmt.Errorf("jsonduration: invalid format %q", string(f))
 }
@@ -200,13 +180,13 @@ func appendDurationBase10(b []byte, d time.Duration, pow10 uint64) []byte {
 // parseDurationBase10 parses d from a decimal fractional number,
 // where pow10 is a power-of-10 used to scale up the number.
 func parseDurationBase10(b []byte, pow10 uint64) (time.Duration, error) {
-	suffix, neg := consumeSign(b, false)                     // consume sign
-	wholeBytes, fracBytes := bytesCutByte(suffix, '.', true) // consume whole and frac fields
-	whole, okWhole := parseUint(wholeBytes)                  // parse whole field; may overflow
-	frac, okFrac := parseFracBase10(fracBytes, pow10)        // parse frac field
-	hi, lo := bits.Mul64(whole, pow10)                       // overflow if hi > 0
-	sum, co := bits.Add64(lo, frac, 0)                       // overflow if co > 0
-	switch d := mayApplyDurationSign(sum, neg); {            // overflow if neg != (d < 0)
+	suffix, neg := consumeSign(b, false)               // consume sign
+	wholeBytes, fracBytes := bytesCutByte(suffix, '.') // consume whole and frac fields
+	whole, okWhole := parseUint(wholeBytes)            // parse whole field; may overflow
+	frac, okFrac := parseFracBase10(fracBytes, pow10)  // parse frac field
+	hi, lo := bits.Mul64(whole, pow10)                 // overflow if hi > 0
+	sum, co := bits.Add64(lo, frac, 0)                 // overflow if co > 0
+	switch d := mayApplyDurationSign(sum, neg); {      // overflow if neg != (d < 0)
 	case (!okWhole && whole != math.MaxUint64) || !okFrac:
 		return 0, fmt.Errorf("invalid duration %q: %w", b, strconv.ErrSyntax)
 	case !okWhole || hi > 0 || co > 0 || (neg != (d < 0) && d != 0):
@@ -343,79 +323,6 @@ func parseDurationISO8601(b []byte, days bool) (time.Duration, error) {
 	default:
 		return d, nil
 	}
-}
-
-// appendDurationBase60 appends d formatted with H:MM:SS.SSS notation.
-func appendDurationBase60(b []byte, d time.Duration) []byte {
-	b, n := mayAppendDurationSign(b, d)                      // append sign
-	n, nsec := bits.Div64(0, n, 1e9)                         // compute nsec field
-	n, sec := bits.Div64(0, n, 60)                           // compute sec field
-	hour, mins := bits.Div64(0, n, 60)                       // compute hour and min fields
-	b = strconv.AppendUint(b, hour, 10)                      // append hour field
-	b = append(b, ':', '0'+byte(mins/10), '0'+byte(mins%10)) // append min field
-	b = append(b, ':', '0'+byte(sec/10), '0'+byte(sec%10))   // append sec field
-	return appendFracBase10(b, nsec, 1e9)                    // append nsec field
-}
-
-// parseDurationBase60 parses d formatted with H:MM:SS.SSS notation.
-// The exact grammar is `-?(0|[1-9][0-9]*):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?`.
-func parseDurationBase60(b []byte) (time.Duration, error) {
-	checkBase60 := func(b []byte) bool {
-		return len(b) == 2 && ('0' <= b[0] && b[0] <= '5') && '0' <= b[1] && b[1] <= '9'
-	}
-	suffix, neg := consumeSign(b, false)                   // consume sign
-	hourBytes, suffix := bytesCutByte(suffix, ':', false)  // consume hour field
-	minBytes, suffix := bytesCutByte(suffix, ':', false)   // consume min field
-	secBytes, nsecBytes := bytesCutByte(suffix, '.', true) // consume sec and nsec fields
-	hour, okHour := parseUint(hourBytes)                   // parse hour field; may overflow
-	mins := parseDec2(minBytes)                            // parse min field
-	sec := parseDec2(secBytes)                             // parse sec field
-	nsec, okNsec := parseFracBase10(nsecBytes, 1e9)        // parse nsec field
-	n := uint64(mins)*60*1e9 + uint64(sec)*1e9 + nsec      // cannot overflow
-	hi, lo := bits.Mul64(hour, 60*60*1e9)                  // overflow if hi > 0
-	sum, co := bits.Add64(lo, n, 0)                        // overflow if co > 0
-	switch d := mayApplyDurationSign(sum, neg); {          // overflow if neg != (d < 0)
-	case (!okHour && hour != math.MaxUint64) || !checkBase60(minBytes) || !checkBase60(secBytes) || !okNsec:
-		return 0, fmt.Errorf("invalid duration %q: %w", b, strconv.ErrSyntax)
-	case !okHour || hi > 0 || co > 0 || (neg != (d < 0) && d != 0):
-		return 0, fmt.Errorf("invalid duration %q: %w", b, strconv.ErrRange)
-	default:
-		return d, nil
-	}
-}
-
-// appendDurationProto appends d in the protobuf JSON mapping of
-// google.protobuf.Duration: seconds with 0, 3, 6 or 9 fractional digits
-// followed by "s".
-func appendDurationProto(b []byte, d time.Duration) []byte {
-	b, n := mayAppendDurationSign(b, d)
-	sec, nsec := bits.Div64(0, n, 1e9)
-	b = strconv.AppendUint(b, sec, 10)
-	switch {
-	case nsec == 0:
-	case nsec%1e6 == 0:
-		b = appendPaddedBase10(append(b, '.'), nsec/1e6, 1e3)
-	case nsec%1e3 == 0:
-		b = appendPaddedBase10(append(b, '.'), nsec/1e3, 1e6)
-	default:
-		b = appendPaddedBase10(append(b, '.'), nsec, 1e9)
-	}
-	return append(b, 's')
-}
-
-// parseDurationProto parses the protobuf JSON mapping of
-// google.protobuf.Duration. The grammar is `-?(0|[1-9][0-9]*)([.][0-9]{1,9})?s`.
-func parseDurationProto(b []byte) (time.Duration, error) {
-	number, ok := bytes.CutSuffix(b, []byte("s"))
-	_, fracBytes := bytesCutByte(number, '.', true)
-	if !ok || len(fracBytes) > len(".000000000") {
-		return 0, fmt.Errorf("invalid protobuf duration %q: %w", b, strconv.ErrSyntax)
-	}
-	d, err := parseDurationBase10(number, 1e9)
-	if err != nil {
-		return 0, fmt.Errorf("invalid protobuf duration %q: %w", b, errors.Unwrap(err))
-	}
-	return d, nil
 }
 
 // unitLengths are the units of time.ParseDuration, in nanoseconds.
@@ -634,23 +541,11 @@ func consumeSign(b []byte, allowPlus bool) ([]byte, bool) {
 	return b, false
 }
 
-// bytesCutByte is similar to bytes.Cut(b, []byte{c}),
-// except c may optionally be included as part of the suffix.
-func bytesCutByte(b []byte, c byte, include bool) ([]byte, []byte) {
+// bytesCutByte is similar to bytes.Cut(b, []byte{c}), except that c stays
+// at the start of the suffix.
+func bytesCutByte(b []byte, c byte) ([]byte, []byte) {
 	if i := bytes.IndexByte(b, c); i >= 0 {
-		if include {
-			return b[:i], b[i:]
-		}
-		return b[:i], b[i+1:]
+		return b[:i], b[i:]
 	}
 	return b, nil
-}
-
-// parseDec2 parses b as an unsigned, base-10, 2-digit number.
-// The result is undefined if digits are not base-10.
-func parseDec2(b []byte) byte {
-	if len(b) < 2 {
-		return 0
-	}
-	return 10*(b[0]-'0') + (b[1] - '0')
 }
