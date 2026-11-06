@@ -1,7 +1,8 @@
 # jsonduration
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/pscheid92/jsonduration.svg)](https://pkg.go.dev/github.com/pscheid92/jsonduration)
 [![CI](https://github.com/pscheid92/jsonduration/actions/workflows/ci.yml/badge.svg)](https://github.com/pscheid92/jsonduration/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/pscheid92/jsonduration.svg)](https://pkg.go.dev/github.com/pscheid92/jsonduration)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fpscheid92%2Fjsonduration%2Fbadges%2Fcoverage.json)](https://github.com/pscheid92/jsonduration/actions/workflows/ci.yml)
 
 JSON formats for `time.Duration` in Go's `encoding/json/v2`.
 

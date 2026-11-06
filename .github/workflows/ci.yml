@@ -56,6 +56,40 @@ jobs:
             exit 1
           fi
 
+  coverage-badge:
+    # Publishes the measured coverage for the badge in README.md, as a shields.io endpoint file on the badges branch,
+    # which holds nothing else. It publishes whatever the tests measure, independent of the threshold the test job
+    # enforces, so the badge also shows a drop.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the badges branch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test -count=1 -coverprofile=coverage.out ./...
+      - name: Publish the badge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ { print $3 }')
+          color=$(awk -v t="${total%\%}" 'BEGIN { print (t >= 100 ? "brightgreen" : t >= 90 ? "green" : t >= 75 ? "yellow" : "red") }')
+          mkdir "$RUNNER_TEMP/badges"
+          cd "$RUNNER_TEMP/badges"
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s","color":"%s"}\n' "$total" "$color" > coverage.json
+          # One fresh commit each time, force-pushed, so the branch never grows.
+          git init -q -b badges
+          git add coverage.json
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Coverage ${total} at ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
+          echo "### Coverage badge: ${total}" >> "$GITHUB_STEP_SUMMARY"
+
   lint:
     runs-on: ubuntu-latest
     steps:
