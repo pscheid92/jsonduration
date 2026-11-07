@@ -1,40 +1,48 @@
-fuzz_targets := "FuzzRoundTrip FuzzParse FuzzUnmarshal FuzzUnitsMatchesParseDuration"
+fuzz_targets := "FuzzRoundTrip FuzzParse FuzzParseMatchesReference FuzzUnmarshal FuzzUnitsMatchesParseDuration"
 
-# List the recipes
 default:
-    @just --list
+    just --list
 
-# Everything CI checks, except fuzzing
-check: lint test vuln
-
-# Format all Go files
-fmt:
-    gofmt -w .
-
-# gofmt, go vet, go mod tidy and golangci-lint
-lint:
-    @test -z "$(gofmt -l .)" || { gofmt -l .; echo "run 'just fmt'"; exit 1; }
-    go vet ./...
-    go mod tidy -diff
-    golangci-lint run ./...
-
-# Run the tests with the race detector
 test:
     go test -race -count=1 ./...
 
-# Show test coverage per function
-cover:
+# Run the tests as a 32-bit program, without -race, which 386 lacks. Linux only: macOS cannot run 32-bit programs.
+test-32bit:
+    GOARCH=386 go test -count=1 ./...
+
+vet:
+    go vet ./...
+
+lint:
+    golangci-lint run ./...
+
+# Format all Go files in place.
+fmt:
+    gofmt -w .
+
+# Apply the Go toolchain's automated fixes and modernizers.
+fix:
+    go fix ./...
+
+# Fail when go fix, gofmt, or go mod tidy would change something; used by check and CI.
+fix-check:
+    go fix -diff ./...
+    @test -z "$(gofmt -l .)" || { gofmt -d .; exit 1; }
+    go mod tidy -diff
+
+coverage:
     go test -count=1 -coverprofile=coverage.out ./...
     go tool cover -func=coverage.out
 
-# Check for known vulnerabilities
+# Scan for known vulnerabilities in the code that is actually reached.
 vuln:
     go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-# Fuzz each target for a while, e.g. `just fuzz 2m FuzzParse`
+# Fuzz every target for a while, or some, as in `just fuzz 2m FuzzParse`.
 fuzz time="30s" *targets=fuzz_targets:
     for t in {{ targets }}; do go test -run='^$' -fuzz="^$t\$" -fuzztime={{ time }} . || exit 1; done
 
-# Run the benchmarks
 bench:
     go test -run='^$' -bench=. -benchmem ./...
+
+check: fix-check vet lint test vuln

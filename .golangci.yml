@@ -1,23 +1,45 @@
 version: "2"
 
 linters:
-  # The standard set (errcheck, govet, ineffassign, staticcheck, unused)
-  # plus checks that catch real bugs or doc drift in a small library.
+  default: standard
   enable:
+    - asciicheck
+    - bidichk
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errname
     - errorlint
     - gocritic
+    - godoclint
+    - godot
+    - goprintffuncname
+    - gosec
+    - intrange
     - misspell
-    - nolintlint
+    - nakedret
+    - nilerr
+    - noctx
+    - prealloc
     - revive
     - unconvert
     - unparam
-    - usestdlibvars
+    - wastedassign
 
-formatters:
-  enable:
-    - gofmt
-    - goimports
+  exclusions:
+    rules:
+      # Tests use a seeded math/rand for reproducible inputs and convert freely between integer types.
+      - path: _test\.go
+        linters: [gosec]
+        text: "G115|G404"
+
   settings:
-    goimports:
-      local-prefixes:
-        - github.com/pscheid92/jsonduration
+    godot:
+      scope: toplevel
+    nakedret:
+      max-func-lines: 0
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style

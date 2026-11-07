@@ -1,11 +1,13 @@
-# Editors
+# Editors and tools
 .idea/
 .vscode/
+.claude/
+.DS_Store
 
-# Test and coverage output
+# Test output
 *.test
 *.out
+*.prof
 coverage.*
 
-# Note: testdata/fuzz is NOT ignored. Inputs that make a fuzz target fail
-# land there and belong in the repository as regression tests.
+# testdata/fuzz is not ignored: failing fuzz inputs land there and stay as regression tests.
