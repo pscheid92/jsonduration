@@ -1,551 +1,159 @@
-// Copyright 2026 Patrick Scheid. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-//
-// The base-10 and ISO 8601 codecs are adapted from
-// encoding/json/v2/arshal_time.go (Go 1.27.3). Those portions are
-// Copyright 2020 The Go Authors; see LICENSE.
-
 package jsonduration
 
-import (
-	"bytes"
-	"errors"
-	"fmt"
-	"math"
-	"math/bits"
-	"strconv"
-	"strings"
-	"time"
-)
+import "time"
 
-// Format names a JSON representation of a [time.Duration]. Its value is
-// the name of the format, such as "iso8601", and names match exactly, case
-// included, as they did in the `format` struct tag option of
-// encoding/json/v2.
+// Format is a way to write a [time.Duration] in JSON, such as [ISO8601] for "PT1H30M".
+// Use it with [With], or convert single durations with [Format.Format] and [Format.Parse].
 //
-// A Format converted from a string, as in Format(s), is not checked. Check
-// such a value with [Format.Valid] before passing it to [With], which
-// panics on an invalid format. [Format.UnmarshalText] checks for itself.
+// A flag ([flag.TextVar]) or a JSON configuration can name a format, and both reject unknown names.
+// [With] panics on an invalid Format, such as the empty one that decoding leaves for a missing name or null,
+// so give it a default, as in cmp.Or(cfg.DurationFormat, jsonduration.ISO8601).
+// A Format converted from a string, as in Format(os.Getenv("DURATION_FORMAT")), is not checked,
+// so check it with [Format.Valid] first.
 type Format string
 
 const (
-	// Units is a JSON string produced by [time.Duration.String], e.g.
-	// "1h30m0.5s". Like the standard library, durations under one
-	// millisecond use "µs". Input is what [time.ParseDuration] accepts,
-	// such as "1h30m" or "1.5us", but fractions are computed exactly
-	// instead of through float64, and errors wrap [strconv.ErrSyntax] or
-	// [strconv.ErrRange] like those of the other formats.
+	// Units writes a JSON string as [time.Duration.String] does, such as "1h30m0.5s".
+	// It reads everything [time.ParseDuration] reads, such as "90s" or "1.5h".
 	Units Format = "units"
 
-	// Sec is a JSON number of seconds with up to 9 fractional digits,
-	// e.g. 5400.5. It is exact: the value is never routed through float64.
+	// Sec writes a JSON number of seconds, such as 5400.5, with decimals down to nanoseconds.
+	// It does not read exponents such as 1e-05, which some encoders write for small numbers.
 	Sec Format = "sec"
 
-	// Milli is a JSON number of milliseconds, e.g. 5400500.
+	// Milli writes a JSON number of milliseconds, such as 5400500, or 1.5 for 1500µs.
 	Milli Format = "milli"
 
-	// Micro is a JSON number of microseconds, e.g. 5400500000.
+	// Micro writes a JSON number of microseconds, such as 5400500000, or 1.5 for 1500ns.
 	Micro Format = "micro"
 
-	// Nano is a JSON integer of nanoseconds, e.g. 5400500000000.
-	// This is the representation of encoding/json (v1).
+	// Nano writes a JSON number of nanoseconds, such as 5400500000000, as encoding/json (v1) does.
+	// Beyond about 104 days, JavaScript and other decoders that read numbers as float64 can no longer hold it exactly.
 	Nano Format = "nano"
 
-	// ISO8601 is a JSON string with the restricted ISO 8601 profile of
-	// encoding/json/v2, e.g. "PT1H30M0.5S". Output only uses the accurate
-	// hour, minute and second designators. Input follows the grammar of
-	// JavaScript's Temporal.Duration; unlike the standard library, input
-	// with the nominal designators year, month, week or day is rejected,
-	// unless [AcceptDays] allows days and weeks.
+	// ISO8601 writes a JSON string in ISO 8601, such as "PT1H30M0.5S", in hours, minutes, and seconds.
+	// It also reads forms such as "PT90M" and "PT1.5H", but rejects years, months, weeks, and days,
+	// whose length varies; see [AcceptDays].
+	// Only a sign in front is allowed, as in "-PT1H30M", so Java's "PT-1H-30M" is rejected.
 	ISO8601 Format = "iso8601"
 )
 
-// Formats returns every supported format, in a new slice on each call.
+// Formats returns all formats, for example to list them in a flag's usage.
 func Formats() []Format {
 	return []Format{Units, Sec, Milli, Micro, Nano, ISO8601}
 }
 
-// Valid reports whether f is exactly one of the supported formats, so
-// that, for example, "ISO8601" is not valid. Use it to check a Format
-// converted from a string before passing it to [With].
+// Valid reports whether f is one of the formats. Names are lowercase, so Format("ISO8601") is not valid.
 func (f Format) Valid() bool {
-	switch f {
-	case Units, Sec, Milli, Micro, Nano, ISO8601:
-		return true
-	}
-	return false
+	_, ok := f.codec()
+	return ok
 }
 
-// IsNumeric reports whether f encodes as a JSON number.
-// Numeric formats are written as JSON strings when used as an object name
-// or when json.StringifyNumbers is set.
-func (f Format) IsNumeric() bool {
-	return f.pow10() != 0
-}
-
-func (f Format) pow10() uint64 {
-	switch f {
-	case Sec:
-		return 1e9
-	case Milli:
-		return 1e6
-	case Micro:
-		return 1e3
-	case Nano:
-		return 1
-	}
-	return 0
-}
-
-// Append appends the representation of d in format f to b,
-// without JSON quoting. It panics if f is not valid.
-func (f Format) Append(b []byte, d time.Duration) []byte {
-	switch f {
-	case Units:
-		return append(b, d.String()...)
-	case Sec, Milli, Micro, Nano:
-		return appendDurationBase10(b, d, f.pow10())
-	case ISO8601:
-		return appendDurationISO8601(b, d)
-	}
-	panic(fmt.Sprintf("jsonduration: invalid format %q", string(f)))
-}
-
-// Format returns the representation of d in format f, without JSON quoting.
-// It panics if f is not valid.
+// Format returns the duration as text in format f, without JSON quotes,
+// such as "PT1M30S" for 90 seconds in ISO8601 or "90" in Sec.
+// Use it to write a duration outside JSON the same way, such as in a log line. It panics if f is not valid.
 func (f Format) Format(d time.Duration) string {
-	return string(f.Append(nil, d))
+	var buf [maxPossibleOutputLength]byte
+	return string(f.mustCodec().appendTo(buf[:0], d))
 }
 
-// Parse parses s, which must be in format f and not JSON quoted.
-// Only format f is accepted; there is no fallback to other formats.
-// Fractional digits below one nanosecond are truncated toward zero.
-// Errors wrap [strconv.ErrSyntax], [strconv.ErrRange] or [ErrNominalUnits].
+// Parse reads a duration in format f, without JSON quotes, such as "5400.5" in Sec or "PT1H30M" in ISO8601.
+// It is the inverse of [Format.Format] and reads only format f,
+// since [AlsoAccept] and [AcceptDays] apply to JSON decoding only. Digits below one nanosecond are truncated.
+// An error matches [ErrInvalidDuration]. It panics if f is not valid.
 func (f Format) Parse(s string) (time.Duration, error) {
-	return f.parse([]byte(s), false)
-}
+	text := []byte(s)
 
-// parse parses b in format f. With days set, [ISO8601] reads days and
-// weeks as exactly 24 hours and 7 days.
-func (f Format) parse(b []byte, days bool) (time.Duration, error) {
-	switch f {
-	case Units:
-		return parseDurationUnits(b)
-	case Sec, Milli, Micro, Nano:
-		return parseDurationBase10(b, f.pow10())
-	case ISO8601:
-		return parseDurationISO8601(b, days)
+	d, cause := f.mustCodec().parse(text)
+	if cause != nil {
+		return 0, errInvalidDuration(text, string(f), cause)
 	}
-	return 0, fmt.Errorf("jsonduration: invalid format %q", string(f))
+
+	return d, nil
 }
 
-// MarshalText implements [encoding.TextMarshaler], so that a format can be
-// written to configuration. It returns an error if f is not valid.
+// MarshalText returns the name of f, such as "iso8601", so that a configuration holds a Format by its name.
+// It returns an error if f is not valid.
 func (f Format) MarshalText() ([]byte, error) {
 	if !f.Valid() {
-		return nil, fmt.Errorf("jsonduration: invalid format %q", string(f))
+		return nil, errInvalidFormat(f)
 	}
+
 	return []byte(f), nil
 }
 
-// UnmarshalText implements [encoding.TextUnmarshaler], so that a format
-// in a JSON configuration is checked while encoding/json/v2 decodes it, and
-// so that a format can come from a flag (see [flag.TextVar]). It accepts
-// exactly the names of the formats, such as "iso8601", and rejects
-// anything else, including other spellings such as "ISO8601", with an
-// error that lists the names.
+// UnmarshalText sets f from a name such as "iso8601",
+// so that a flag ([flag.TextVar]) or a JSON configuration can name a format.
+// Any other name is an error that lists the valid ones and leaves f unchanged.
 func (f *Format) UnmarshalText(b []byte) error {
-	g := Format(b)
-	if !g.Valid() {
-		names := make([]string, 0, 8)
-		for _, h := range Formats() {
-			names = append(names, string(h))
-		}
-		return fmt.Errorf("jsonduration: unknown format %q, want one of %s", b, strings.Join(names, ", "))
+	newFormat := Format(b)
+
+	if !newFormat.Valid() {
+		return errUnknownFormat(b)
 	}
-	*f = g
+
+	*f = newFormat
 	return nil
 }
 
-// appendDurationBase10 appends d formatted as a decimal fractional number,
-// where pow10 is a power-of-10 used to scale down the number.
-func appendDurationBase10(b []byte, d time.Duration, pow10 uint64) []byte {
-	b, n := mayAppendDurationSign(b, d)     // append sign
-	whole, frac := bits.Div64(0, n, pow10)  // compute whole and frac fields
-	b = strconv.AppendUint(b, whole, 10)    // append whole field
-	return appendFracBase10(b, frac, pow10) // append frac field
+// A codec writes and reads durations in one format, without JSON quotes.
+// Each format has its own codec type in its own file, and Format.codec maps a format to it.
+type codec interface {
+	// numeric reports whether the format writes a JSON number rather than a string.
+	numeric() bool
+
+	// appendTo appends d to b.
+	appendTo(b []byte, d time.Duration) []byte
+
+	// parse reads b.
+	// If b is not a duration in this format, it returns the cause:
+	// [strconv.ErrSyntax], [strconv.ErrRange], [ErrCalendarUnits], or an error that wraps one of them.
+	// errInvalidDuration turns the cause into the error a caller sees.
+	parse(b []byte) (time.Duration, error)
 }
 
-// parseDurationBase10 parses d from a decimal fractional number,
-// where pow10 is a power-of-10 used to scale up the number.
-func parseDurationBase10(b []byte, pow10 uint64) (time.Duration, error) {
-	suffix, neg := consumeSign(b, false)               // consume sign
-	wholeBytes, fracBytes := bytesCutByte(suffix, '.') // consume whole and frac fields
-	whole, okWhole := parseUint(wholeBytes)            // parse whole field; may overflow
-	frac, okFrac := parseFracBase10(fracBytes, pow10)  // parse frac field
-	hi, lo := bits.Mul64(whole, pow10)                 // overflow if hi > 0
-	sum, co := bits.Add64(lo, frac, 0)                 // overflow if co > 0
-	switch d := mayApplyDurationSign(sum, neg); {      // overflow if neg != (d < 0)
-	case (!okWhole && whole != math.MaxUint64) || !okFrac:
-		return 0, fmt.Errorf("invalid duration %q: %w", b, strconv.ErrSyntax)
-	case !okWhole || hi > 0 || co > 0 || (neg != (d < 0) && d != 0):
-		return 0, fmt.Errorf("invalid duration %q: %w", b, strconv.ErrRange)
-	default:
-		return d, nil
+// maxPossibleOutputLength is the length of the longest text any codec writes. TestLongestOutput checks it.
+const maxPossibleOutputLength = 27
+
+// codec returns the codec of format f, and false if f is not valid.
+func (f Format) codec() (codec, bool) {
+	switch f {
+	case Units:
+		return codecUnits, true
+	case Sec:
+		return codecSec, true
+	case Milli:
+		return codecMilli, true
+	case Micro:
+		return codecMicro, true
+	case Nano:
+		return codecNano, true
+	case ISO8601:
+		return codecISO8601, true
 	}
+
+	return nil, false
 }
 
-// appendDurationISO8601 appends an ISO 8601 duration with a restricted grammar,
-// where leading and trailing zeroes and zero-value designators are omitted.
-// It only uses hour, minute, and second designators since ISO 8601 defines
-// those as being "accurate", while year, month, week, and day are "nominal".
-func appendDurationISO8601(b []byte, d time.Duration) []byte {
-	if d == 0 {
-		return append(b, "PT0S"...)
+// mustCodec returns the codec of format f, and panics if f is not valid.
+func (f Format) mustCodec() codec {
+	c, ok := f.codec()
+	if !ok {
+		panic(errInvalidFormat(f))
 	}
-	b, n := mayAppendDurationSign(b, d)
-	b = append(b, "PT"...)
-	n, nsec := bits.Div64(0, n, 1e9)   // compute nsec field
-	n, sec := bits.Div64(0, n, 60)     // compute sec field
-	hour, mins := bits.Div64(0, n, 60) // compute hour and min fields
-	if hour > 0 {
-		b = append(strconv.AppendUint(b, hour, 10), 'H')
-	}
-	if mins > 0 {
-		b = append(strconv.AppendUint(b, mins, 10), 'M')
-	}
-	if sec > 0 || nsec > 0 {
-		b = append(appendFracBase10(strconv.AppendUint(b, sec, 10), nsec, 1e9), 'S')
-	}
-	return b
+
+	return c
 }
 
-// ErrNominalUnits reports an ISO 8601 duration that uses the year, month,
-// week or day designators. Their length in time is not fixed, so they
-// cannot be converted to a [time.Duration] exactly. [AcceptDays] allows
-// days and weeks by fixing their length.
-var ErrNominalUnits = errors.New("nominal year, month, week, or day units")
+// The codecs of the formats. They are values of the interface type, so that handing one out does not allocate.
+var (
+	codecUnits   codec = unitsCodec{}
+	codecSec     codec = decimalCodec{unit: uint64(time.Second)}
+	codecMilli   codec = decimalCodec{unit: uint64(time.Millisecond)}
+	codecMicro   codec = decimalCodec{unit: uint64(time.Microsecond)}
+	codecNano    codec = decimalCodec{unit: uint64(time.Nanosecond)}
+	codecISO8601 codec = iso8601Codec{}
 
-// parseDurationISO8601 parses a duration according to ISO 8601-1:2019,
-// section 5.5.2.2 and 5.5.2.3, with the restrictions and extensions of
-// encoding/json/v2 (see its source for the full list):
-// a leading sign, '.' or ',' as decimal separator, leading zeros, lowercase
-// designators, and a fraction only in the last component.
-//
-// It deviates from encoding/json/v2 in three ways:
-//   - Any nominal unit (Y, M before T, W, D) is rejected outright, instead
-//     of returning a best-effort value together with an error.
-//   - Fractions of hours and minutes are computed exactly and truncated,
-//     instead of being rounded through float64 (off by 1ns for about one
-//     input in eight).
-//   - A fraction must consist of digits only; encoding/json/v2 does not
-//     check its first character and accepts "PT1.e5H" as one hour.
-//
-// With days set, days and weeks count as exactly 24 hours and 7 days, as
-// in Java's Duration.parse; years and months are still rejected.
-func parseDurationISO8601(b []byte, days bool) (time.Duration, error) {
-	const day, week = 24 * time.Hour, 7 * 24 * time.Hour
-	var invalid, overflow, nominal, sawFrac bool
-	var sumNanos, n, co uint64
-
-	// cutBytes is like [bytes.Cut], but uses either c0 or c1 as the separator.
-	cutBytes := func(b []byte, c0, c1 byte) (prefix, suffix []byte, ok bool) {
-		for i, c := range b {
-			if c == c0 || c == c1 {
-				return b[:i], b[i+1:], true
-			}
-		}
-		return b, nil, false
-	}
-
-	// mayParseUnit attempts to parse another date or time number
-	// identified by the desHi and desLo unit characters.
-	// If the part is absent for current unit, it returns b as is.
-	mayParseUnit := func(b []byte, desHi, desLo byte, unit time.Duration) []byte {
-		number, suffix, ok := cutBytes(b, desHi, desLo)
-		if !ok || sawFrac {
-			return b // designator is not present or already saw fraction, which can only be in the last component
-		}
-
-		// Parse the number.
-		// A fraction is allowed for the accurate units in the last part.
-		whole, frac, ok := cutBytes(number, '.', ',')
-		if ok {
-			sawFrac = true
-			n, ok = fracOfUnit(frac, uint64(unit)) // exact, never exceeds unit
-			invalid = invalid || len(frac) == 0 || !ok || unit > time.Hour
-			sumNanos, co = bits.Add64(sumNanos, n, 0) // overflow if co > 0
-			overflow = overflow || co > 0
-		}
-		for len(whole) > 1 && whole[0] == '0' {
-			whole = whole[len("0"):] // trim leading zeros
-		}
-		n, ok := parseUint(whole)                  // overflow if !ok && MaxUint64
-		hi, lo := bits.Mul64(n, uint64(unit))      // overflow if hi > 0
-		sumNanos, co = bits.Add64(sumNanos, lo, 0) // overflow if co > 0
-		invalid = invalid || (!ok && n != math.MaxUint64)
-		overflow = overflow || (!ok && n == math.MaxUint64) || hi > 0 || co > 0
-		fixed := unit <= time.Hour || days && (unit == day || unit == week)
-		nominal = nominal || !fixed
-		return suffix
-	}
-
-	suffix, neg := consumeSign(b, true)
-	prefix, suffix, okP := cutBytes(suffix, 'P', 'p')
-	durDate, durTime, okT := cutBytes(suffix, 'T', 't')
-	invalid = invalid || len(prefix) > 0 || !okP || (okT && len(durTime) == 0) || len(durDate)+len(durTime) == 0
-	if len(durDate) > 0 { // nominal portion of the duration
-		// Years and months are always rejected, so their lengths only need
-		// to differ from those of days and weeks and exceed an hour.
-		durDate = mayParseUnit(durDate, 'Y', 'y', 365*day)
-		durDate = mayParseUnit(durDate, 'M', 'm', 30*day)
-		durDate = mayParseUnit(durDate, 'W', 'w', week)
-		durDate = mayParseUnit(durDate, 'D', 'd', day)
-		invalid = invalid || len(durDate) > 0 // unknown elements
-	}
-	if len(durTime) > 0 { // accurate portion of the duration
-		durTime = mayParseUnit(durTime, 'H', 'h', time.Hour)
-		durTime = mayParseUnit(durTime, 'M', 'm', time.Minute)
-		durTime = mayParseUnit(durTime, 'S', 's', time.Second)
-		invalid = invalid || len(durTime) > 0 // unknown elements
-	}
-	d := mayApplyDurationSign(sumNanos, neg)
-	overflow = overflow || (neg != (d < 0) && d != 0) // overflows signed duration
-
-	switch {
-	case invalid:
-		return 0, fmt.Errorf("invalid ISO 8601 duration %q: %w", b, strconv.ErrSyntax)
-	case nominal:
-		return 0, fmt.Errorf("invalid ISO 8601 duration %q: %w", b, ErrNominalUnits)
-	case overflow:
-		return 0, fmt.Errorf("invalid ISO 8601 duration %q: %w", b, strconv.ErrRange)
-	default:
-		return d, nil
-	}
-}
-
-// unitLengths are the units of time.ParseDuration, in nanoseconds.
-var unitLengths = map[string]uint64{
-	"ns": uint64(time.Nanosecond),
-	"us": uint64(time.Microsecond),
-	"µs": uint64(time.Microsecond), // U+00B5, the micro sign
-	"μs": uint64(time.Microsecond), // U+03BC, the Greek letter mu
-	"ms": uint64(time.Millisecond),
-	"s":  uint64(time.Second),
-	"m":  uint64(time.Minute),
-	"h":  uint64(time.Hour),
-}
-
-// parseDurationUnits parses the grammar of time.ParseDuration and accepts
-// exactly the same inputs: `[-+]?([0-9]*(\.[0-9]*)?[a-z]+)+`, or "0" with
-// an optional sign. Fractions are computed exactly and truncated, where
-// time.ParseDuration goes through float64, and errors wrap
-// strconv.ErrSyntax or strconv.ErrRange.
-func parseDurationUnits(b []byte) (time.Duration, error) {
-	syntaxError := func(detail string) error {
-		return fmt.Errorf("invalid duration %q: %s%w", b, detail, strconv.ErrSyntax)
-	}
-	isDigit := func(c byte) bool { return '0' <= c && c <= '9' }
-
-	s, neg := b, false
-	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
-		neg = s[0] == '-'
-		s = s[1:]
-	}
-	if string(s) == "0" {
-		return 0, nil
-	}
-	if len(s) == 0 {
-		return 0, syntaxError("")
-	}
-	var sum, co2 uint64
-	overflow := false
-	for len(s) > 0 {
-		if s[0] != '.' && !isDigit(s[0]) {
-			return 0, syntaxError("")
-		}
-		i := 0
-		for i < len(s) && isDigit(s[i]) {
-			i++
-		}
-		whole, frac := s[:i], s[i:i]
-		s = s[i:]
-		if len(s) > 0 && s[0] == '.' {
-			j := 1
-			for j < len(s) && isDigit(s[j]) {
-				j++
-			}
-			frac, s = s[1:j], s[j:]
-		}
-		if len(whole) == 0 && len(frac) == 0 {
-			return 0, syntaxError("") // no digits, as in ".s"
-		}
-		i = 0
-		for i < len(s) && s[i] != '.' && !isDigit(s[i]) {
-			i++
-		}
-		if i == 0 {
-			return 0, syntaxError("missing unit: ")
-		}
-		unit, ok := unitLengths[string(s[:i])]
-		if !ok {
-			return 0, syntaxError(fmt.Sprintf("unknown unit %q: ", s[:i]))
-		}
-		s = s[i:]
-
-		n, ok := parseDigits(whole)
-		part, _ := fracOfUnit(frac, unit) // digits only, below unit
-		hi, lo := bits.Mul64(n, unit)
-		lo, co1 := bits.Add64(lo, part, 0)
-		sum, co2 = bits.Add64(sum, lo, 0)
-		overflow = overflow || !ok || hi > 0 || co1 > 0 || co2 > 0 || sum > 1<<63
-	}
-	if overflow || !neg && sum > 1<<63-1 {
-		return 0, fmt.Errorf("invalid duration %q: %w", b, strconv.ErrRange)
-	}
-	return mayApplyDurationSign(sum, neg), nil
-}
-
-// parseDigits parses b, a possibly empty run of decimal digits that may
-// have leading zeros. It reports false if the value overflows a uint64.
-func parseDigits(b []byte) (n uint64, ok bool) {
-	for _, c := range b {
-		if n > (math.MaxUint64-9)/10 {
-			return 0, false
-		}
-		n = 10*n + uint64(c-'0')
-	}
-	return n, true
-}
-
-// mayAppendDurationSign appends a negative sign if n is negative.
-func mayAppendDurationSign(b []byte, d time.Duration) ([]byte, uint64) {
-	if d < 0 {
-		b = append(b, '-')
-		d *= -1
-	}
-	return b, uint64(d)
-}
-
-// mayApplyDurationSign inverts n if neg is specified.
-func mayApplyDurationSign(n uint64, neg bool) time.Duration {
-	if neg {
-		return -1 * time.Duration(n)
-	}
-	return +1 * time.Duration(n)
-}
-
-// appendFracBase10 appends the fraction of n/max10,
-// where max10 is a power-of-10 that is larger than n.
-func appendFracBase10(b []byte, n, max10 uint64) []byte {
-	if n == 0 {
-		return b
-	}
-	return bytes.TrimRight(appendPaddedBase10(append(b, '.'), n, max10), "0")
-}
-
-// parseFracBase10 parses the fraction of n/max10,
-// where max10 is a power-of-10 that is larger than n.
-func parseFracBase10(b []byte, max10 uint64) (n uint64, ok bool) {
-	switch {
-	case len(b) == 0:
-		return 0, true
-	case len(b) < len(".0") || b[0] != '.':
-		return 0, false
-	}
-	return parsePaddedBase10(b[len("."):], max10)
-}
-
-// appendPaddedBase10 appends a zero-padded encoding of n,
-// where max10 is a power-of-10 that is larger than n.
-func appendPaddedBase10(b []byte, n, max10 uint64) []byte {
-	if n < max10/10 {
-		// Formatting of n is shorter than log10(max10),
-		// so add max10/10 to ensure the length is equal to log10(max10).
-		i := len(b)
-		b = strconv.AppendUint(b, n+max10/10, 10)
-		b[i]-- // subtract the addition of max10/10
-		return b
-	}
-	return strconv.AppendUint(b, n, 10)
-}
-
-// fracOfUnit returns ⌊0.frac × unit⌋, where frac holds the decimal digits
-// after the separator. It is exact for any number of digits: the long
-// multiplication runs from the last digit to the first, and the carry that
-// leaves the first digit is the integer part. The carry stays below unit, so
-// nothing overflows as long as 10×unit fits in a uint64.
-// It reports false if frac contains a byte that is not a decimal digit.
-func fracOfUnit(frac []byte, unit uint64) (n uint64, ok bool) {
-	for i := len(frac) - 1; i >= 0; i-- {
-		c := frac[i]
-		if c < '0' || '9' < c {
-			return 0, false
-		}
-		n = (uint64(c-'0')*unit + n) / 10
-	}
-	return n, true
-}
-
-// parsePaddedBase10 parses b as the zero-padded encoding of n,
-// where max10 is a power-of-10 that is larger than n.
-// Truncated suffix is treated as implicit zeros.
-// Extended suffix is ignored, but verified to contain only digits.
-func parsePaddedBase10(b []byte, max10 uint64) (n uint64, ok bool) {
-	pow10 := uint64(1)
-	for pow10 < max10 {
-		n *= 10
-		if len(b) > 0 {
-			if b[0] < '0' || '9' < b[0] {
-				return n, false
-			}
-			n += uint64(b[0] - '0')
-			b = b[1:]
-		}
-		pow10 *= 10
-	}
-	if len(b) > 0 && len(bytes.TrimRight(b, "0123456789")) > 0 {
-		return n, false // trailing characters are not digits
-	}
-	return n, true
-}
-
-// parseUint parses b as a decimal unsigned integer without sign or
-// leading zeros. On overflow it reports (math.MaxUint64, false).
-// Adapted from encoding/json/internal/jsonwire.ParseUint.
-func parseUint(b []byte) (v uint64, ok bool) {
-	const unsafeWidth = 20 // len(fmt.Sprint(uint64(math.MaxUint64)))
-	var n int
-	for ; len(b) > n && ('0' <= b[n] && b[n] <= '9'); n++ {
-		v = 10*v + uint64(b[n]-'0')
-	}
-	switch {
-	case n == 0 || len(b) != n || (b[0] == '0' && string(b) != "0"):
-		return 0, false
-	case n >= unsafeWidth && (b[0] != '1' || v < 1e19 || n > unsafeWidth):
-		return math.MaxUint64, false
-	}
-	return v, true
-}
-
-// consumeSign consumes an optional leading negative or positive sign.
-func consumeSign(b []byte, allowPlus bool) ([]byte, bool) {
-	if len(b) > 0 {
-		if b[0] == '-' {
-			return b[len("-"):], true
-		} else if b[0] == '+' && allowPlus {
-			return b[len("+"):], false
-		}
-	}
-	return b, false
-}
-
-// bytesCutByte is similar to bytes.Cut(b, []byte{c}), except that c stays
-// at the start of the suffix.
-func bytesCutByte(b []byte, c byte) ([]byte, []byte) {
-	if i := bytes.IndexByte(b, c); i >= 0 {
-		return b[:i], b[i:]
-	}
-	return b, nil
-}
+	// codecISO8601Days also reads days and weeks, for decoding with AcceptDays.
+	codecISO8601Days codec = iso8601Codec{acceptDays: true}
+)

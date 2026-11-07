@@ -1,33 +1,25 @@
-// Copyright 2026 Patrick Scheid. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-// Package jsonduration gives [time.Duration] a JSON representation in
-// encoding/json/v2.
+// Package jsonduration gives [time.Duration] a JSON representation in encoding/json/v2.
 //
-// encoding/json/v2 has no default representation for time.Duration
-// (https://go.dev/issue/71631): marshaling or unmarshaling one returns an
-// error. The `format` struct tag that used to select one was removed in
-// Go 1.27 (https://go.dev/issue/79071), and its replacement depends on typed
-// struct tags (https://go.dev/issue/74472). This package fills the gap in
-// two ways. It is for encoding/json/v2 only.
+// encoding/json/v2 cannot encode a time.Duration on its own.
+// It has no default representation (https://go.dev/issue/71631),
+// and the `format` struct tag that used to select one was removed in Go 1.27 (https://go.dev/issue/79071).
+// This package fills that gap, for encoding/json/v2 only, in two ways.
 //
-// # One format for a whole call
+// # One option per call
 //
-// [With] returns options that apply one format to every time.Duration in a
-// call: struct fields, pointers, slices, arrays, map keys and values, and
-// values held in an any when marshaling. Your types stay unchanged.
+// [With] returns options that apply one format to every time.Duration in a call:
+// in struct fields, pointers, slices, arrays, map keys and values, and, when marshaling, in values held in an any.
+// Your types stay as they are.
 //
 //	opts := jsonduration.With(jsonduration.ISO8601)
-//	b, err := json.Marshal(v, opts)  // {"ttl":"PT1H30M"}
+//	b, err := json.Marshal(v, opts) // {"ttl":"PT1H30M"}
 //	err = json.Unmarshal(b, &v, opts)
 //
-// # One format per field
+// # One wrapper type per field
 //
-// Each format has a wrapper type, such as [ISO8601Duration] or
-// [SecDuration], that embeds a time.Duration and encodes itself through
-// the encoding/json/v2 interfaces MarshalerTo and UnmarshalerFrom. Wrapper
-// types need no options, and [With] does not change their format.
+// Each format also has a wrapper type, such as [ISO8601Duration] or [SecDuration].
+// It embeds a time.Duration, encodes itself without options, and writes and reads only its own format:
+// [With], [AlsoAccept], and [AcceptDays] do not change it.
 //
 //	type Config struct {
 //		Timeout jsonduration.ISO8601Duration `json:"timeout"`
@@ -36,34 +28,57 @@
 //
 // # Formats
 //
-// The formats are the six that encoding/json/v2 offered through `format`,
-// with the same names and identical output: [Units], [Sec], [Milli],
-// [Micro], [Nano] and [ISO8601]. [Nano] is byte-for-byte compatible with
-// encoding/json (v1).
+// The six formats are those that encoding/json/v2 offered through `format`, with the same names and output:
+// [Units], [Sec], [Milli], [Micro], [Nano], and [ISO8601]. [Nano] writes what encoding/json (v1) writes.
+// A tag option such as `format:sec` is now an error: remove it, and pass With(Sec) or make the field a [SecDuration].
 //
-// A [Format] can come from a JSON configuration or from flags: it
-// implements [encoding.TextUnmarshaler] and rejects anything but the exact
-// names. Check a Format converted from a plain string with [Format.Valid].
+// In every numeric format, decoders that read JSON numbers as float64, such as JavaScript's JSON.parse,
+// can lose the nanoseconds of long durations.
+// So can encoding with jsontext.CanonicalizeRawInts or CanonicalizeRawFloats, which round numbers through float64.
+//
+// A [Format] can come from a JSON configuration or a flag,
+// since it implements [encoding.TextUnmarshaler] and accepts only the exact names.
+// Give it a default for a configuration that names none,
+// and check a Format converted from a plain string with [Format.Valid].
 //
 // # Strictness
 //
-// Decoding accepts only the configured format. To read data written in
-// other formats as well, for example while migrating, name them with
-// [AlsoAccept]. [ISO8601] input with nominal units (years, months, weeks,
-// days) is rejected with [ErrNominalUnits], since those have no fixed
-// length; where a producer means 24 hours by a day, [AcceptDays] reads days
-// and weeks. Fractional digits below one nanosecond are truncated toward
-// zero, exactly, in every format. Errors wrap [strconv.ErrSyntax],
-// [strconv.ErrRange] or [ErrNominalUnits].
+// Decoding accepts only the configured format.
+// To also read other formats, for example while migrating, name them with [AlsoAccept].
 //
-// JSON null sets a duration to zero, as encoding/json/v2 does for other
-// types.
+// [ISO8601] rejects years, months, weeks, and days with [ErrCalendarUnits], since their length varies.
+// Where a producer means 24 hours by a day, [AcceptDays] reads days and weeks.
+//
+// The numeric formats read JSON numbers without an exponent, such as 5400.5 but not 5.4005e3.
+// Every format reads decimals exactly, without floating-point rounding, and drops digits below one nanosecond.
+//
+// # Errors
+//
+// An error means bad input, and a panic means code that uses this package wrongly.
+//
+// Every error about a duration that could not be read, from [Format.Parse] or from JSON decoding,
+// matches [ErrInvalidDuration]. It names the input, the accepted formats, and the cause:
+//
+//	invalid duration "90s" in format iso8601: invalid syntax
+//
+// The cause is [strconv.ErrSyntax], [strconv.ErrRange], or [ErrCalendarUnits], which the error wraps.
+// With formats from [AlsoAccept], it is a syntax error only if every format rejects the syntax.
+// Only a JSON value of the wrong kind, such as a number for ISO8601, has a cause of its own: "want a JSON string".
+// JSON decoding returns the error inside a json.SemanticError, as encoding/json/v2 does for other types.
+// Its JSONPointer tells where in the input the duration is.
+// A format name that [Format.UnmarshalText] does not know is an error that lists the valid names.
+//
+// An invalid [Format] makes [With], [Marshalers], [Unmarshalers], [Format.Format], and [Format.Parse] panic,
+// also when it was passed to [AlsoAccept].
+// So does accepting two numeric formats, as in With(Sec, AlsoAccept(Nano)).
+// Only [Format.MarshalText] returns an error instead, as [encoding.TextMarshaler] requires.
 //
 // # Good to know
 //
-// Named types such as `type TTL time.Duration` are distinct types and are
-// not affected by [With]. To omit zero durations, use the `omitzero` tag
-// option: in v2, `omitempty` only omits values that encode as empty JSON.
-// The `string` tag option quotes numeric formats, like
-// json.StringifyNumbers, and has no effect on string formats.
+// Named types such as `type TTL time.Duration` are distinct types, so [With] does not affect them,
+// and encoding/json/v2 writes them as plain integers of nanoseconds.
+// To omit zero durations, use the `omitzero` tag option, since `omitempty` only omits values that encode as empty JSON.
+// The `string` tag option quotes numeric formats, like json.StringifyNumbers, and has no effect on string formats.
+// An explicit json.StringifyNumbers(false) turns it off for durations, unlike for other numbers,
+// since json.GetOption then does not report the tag option.
 package jsonduration

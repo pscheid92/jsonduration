@@ -1,20 +1,22 @@
-// Copyright 2026 Patrick Scheid. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package jsonduration
 
 import (
+	"bytes"
 	jsonv1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+type object struct {
+	D time.Duration
+}
 
 type payload struct {
 	TTL  time.Duration                   `json:"ttl"`
@@ -35,169 +37,300 @@ func samplePayload() payload {
 	}
 }
 
-func TestMarshal(t *testing.T) {
-	tests := map[Format]string{
-		Units:   `{"ttl":"1h30m0.5s","ptr":"1h30m0.5s","list":["1s","-1ms"],"keys":{"1m0s":"1h0m0s"},"any":"1h0m0s"}`,
-		Sec:     `{"ttl":5400.5,"ptr":5400.5,"list":[1,-0.001],"keys":{"60":3600},"any":3600}`,
-		Milli:   `{"ttl":5400500,"ptr":5400500,"list":[1000,-1],"keys":{"60000":3600000},"any":3600000}`,
-		Micro:   `{"ttl":5400500000,"ptr":5400500000,"list":[1000000,-1000],"keys":{"60000000":3600000000},"any":3600000000}`,
-		Nano:    `{"ttl":5400500000000,"ptr":5400500000000,"list":[1000000000,-1000000],"keys":{"60000000000":3600000000000},"any":3600000000000}`,
-		ISO8601: `{"ttl":"PT1H30M0.5S","ptr":"PT1H30M0.5S","list":["PT1S","-PT0.001S"],"keys":{"PT1M":"PT1H"},"any":"PT1H"}`,
+func TestWith(t *testing.T) {
+	wantJSON := map[Format]string{
+		Units: `{"ttl":"1h30m0.5s","ptr":"1h30m0.5s","list":["1s","-1ms"],` +
+			`"keys":{"1m0s":"1h0m0s"},"any":"1h0m0s"}`,
+		Sec: `{"ttl":5400.5,"ptr":5400.5,"list":[1,-0.001],` +
+			`"keys":{"60":3600},"any":3600}`,
+		Milli: `{"ttl":5400500,"ptr":5400500,"list":[1000,-1],` +
+			`"keys":{"60000":3600000},"any":3600000}`,
+		Micro: `{"ttl":5400500000,"ptr":5400500000,"list":[1000000,-1000],` +
+			`"keys":{"60000000":3600000000},"any":3600000000}`,
+		Nano: `{"ttl":5400500000000,"ptr":5400500000000,"list":[1000000000,-1000000],` +
+			`"keys":{"60000000000":3600000000000},"any":3600000000000}`,
+		ISO8601: `{"ttl":"PT1H30M0.5S","ptr":"PT1H30M0.5S","list":["PT1S","-PT0.001S"],` +
+			`"keys":{"PT1M":"PT1H"},"any":"PT1H"}`,
 	}
+
 	for _, f := range Formats() {
-		want, ok := tests[f]
-		if !ok {
-			t.Errorf("no test for format %s", f)
-			continue
-		}
-		b, err := json.Marshal(samplePayload(), With(f))
-		if err != nil || string(b) != want {
-			t.Errorf("%s:\n got %s, %v\nwant %s", f, b, err, want)
-			continue
-		}
-		var got payload
-		if err := json.Unmarshal(b, &got, With(f)); err != nil {
-			t.Errorf("%s: Unmarshal: %v", f, err)
-			continue
-		}
-		want2 := samplePayload()
-		if got.TTL != want2.TTL || *got.Ptr != *want2.Ptr || got.List[1] != want2.List[1] || got.Keys[time.Minute] != time.Hour {
-			t.Errorf("%s: round trip = %+v", f, got)
-		}
+		t.Run(string(f), func(t *testing.T) {
+			want, ok := wantJSON[f]
+			if !ok {
+				t.Fatalf("no expected JSON for format %s", f)
+			}
+
+			opts := With(f)
+			p := samplePayload()
+
+			b, err := json.Marshal(p, opts)
+			if err != nil || string(b) != want {
+				t.Fatalf("Marshal = %s, %v\nwant      %s", b, err, want)
+			}
+
+			var got payload
+			if err := json.Unmarshal(b, &got, opts); err != nil {
+				t.Fatalf("Unmarshal(%s): %v", b, err)
+			}
+
+			// A duration in an any comes back as a string or a number.
+			got.Any, p.Any = nil, nil
+			if !reflect.DeepEqual(got, p) {
+				t.Errorf("Unmarshal(%s) = %+v, want %+v", b, got, p)
+			}
+		})
 	}
 }
 
-// TestNanoMatchesV1 checks that Nano is byte-for-byte compatible with
-// encoding/json (v1) in both directions.
 func TestNanoMatchesV1(t *testing.T) {
+	opts := With(Nano)
 	p := samplePayload()
+
 	v1, err := jsonv1.Marshal(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	v2, err := json.Marshal(p, With(Nano))
+
+	v2, err := json.Marshal(p, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(v1) != string(v2) {
-		t.Errorf("v1 and Nano differ:\nv1 %s\nv2 %s", v1, v2)
+
+	if !bytes.Equal(v1, v2) {
+		t.Errorf("Nano differs from encoding/json:\nv1 %s\nv2 %s", v1, v2)
 	}
+
 	var fromV1 payload
-	if err := json.Unmarshal(v1, &fromV1, With(Nano)); err != nil || fromV1.TTL != d90 {
-		t.Errorf("Unmarshal v1 output = %v, %v", fromV1.TTL, err)
+	if err := json.Unmarshal(v1, &fromV1, opts); err != nil || fromV1.TTL != d90 {
+		t.Errorf("Unmarshal(v1 output) = %v, %v, want %v", fromV1.TTL, err, d90)
 	}
 }
 
 func TestStringifyNumbers(t *testing.T) {
-	b, err := json.Marshal(struct{ D time.Duration }{d90}, With(Sec), json.StringifyNumbers(true))
-	if err != nil || string(b) != `{"D":"5400.5"}` {
-		t.Errorf("got %s, %v", b, err)
+	opts := json.JoinOptions(With(Sec), json.StringifyNumbers(true))
+	v := object{D: d90}
+	const want = `{"D":"5400.5"}`
+
+	b, err := json.Marshal(v, opts)
+	if err != nil || string(b) != want {
+		t.Errorf("Marshal = %s, %v, want %s", b, err, want)
 	}
-	var v struct{ D time.Duration }
-	if err := json.Unmarshal(b, &v, With(Sec), json.StringifyNumbers(true)); err != nil || v.D != d90 {
-		t.Errorf("Unmarshal = %v, %v", v.D, err)
+
+	var got object
+	if err := json.Unmarshal(b, &got, opts); err != nil || got.D != d90 {
+		t.Errorf("Unmarshal(%s) = %v, %v, want %v", b, got.D, err, d90)
 	}
 }
 
-func TestUnmarshalStrict(t *testing.T) {
+func TestUnmarshalIsStrict(t *testing.T) {
 	tests := []struct {
+		name    string
 		f       Format
 		in      string
 		wantErr string
 	}{
-		{Sec, `{"D":"5400.5"}`, "must be a JSON number"},        // string where number is required
-		{ISO8601, `{"D":5400}`, "must be a JSON string"},        // number where string is required
-		{ISO8601, `{"D":"1h30m"}`, "invalid ISO 8601 duration"}, // other format, no fallback
-		{Units, `{"D":"PT1H"}`, "invalid duration"},             // other format, no fallback
-		{ISO8601, `{"D":"P1D"}`, "nominal"},                     // nominal units
-		{Nano, `{"D":true}`, "must be a JSON number"},           // wrong kind
-		{Nano, `{"D":1e3}`, "invalid duration"},                 // exponent
-		{Units, `{"D":"1.5"}`, "missing unit"},                  // a number without a unit
-		{Sec, `{"D":99999999999}`, "value out of range"},        // overflow
+		{"string for a numeric format", Sec, `{"D":"5400.5"}`, "want a JSON number"},
+		{"number for a string format", ISO8601, `{"D":5400}`, "want a JSON string"},
+		{"units for ISO 8601", ISO8601, `{"D":"1h30m"}`, "in format iso8601"},
+		{"ISO 8601 for units", Units, `{"D":"PT1H"}`, "invalid duration"},
+		{"calendar units", ISO8601, `{"D":"P1D"}`, "no fixed length"},
+		{"boolean", Nano, `{"D":true}`, "want a JSON number"},
+		{"exponent", Nano, `{"D":1e3}`, "invalid duration"},
+		{"number without a unit", Units, `{"D":"1.5"}`, "missing unit"},
+		{"overflow", Sec, `{"D":99999999999}`, "value out of range"},
 	}
+
 	for _, tt := range tests {
-		var v struct{ D time.Duration }
-		err := json.Unmarshal([]byte(tt.in), &v, With(tt.f))
-		if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-			t.Errorf("%s %s: err = %v, want containing %q", tt.f, tt.in, err, tt.wantErr)
-		}
-		if err != nil && !strings.Contains(err.Error(), `"/D"`) {
-			t.Errorf("%s %s: err %q does not include the JSON pointer", tt.f, tt.in, err)
+		t.Run(tt.name, func(t *testing.T) {
+			opts := With(tt.f)
+
+			var v object
+			err := json.Unmarshal([]byte(tt.in), &v, opts)
+
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Unmarshal(%s) error = %v, want one containing %q", tt.in, err, tt.wantErr)
+			}
+
+			if !strings.Contains(err.Error(), `"/D"`) {
+				t.Errorf("Unmarshal(%s) error %q does not name the JSON pointer", tt.in, err)
+			}
+		})
+	}
+}
+
+func TestNumericMapKeys(t *testing.T) {
+	opts := json.JoinOptions(With(Sec), json.Deterministic(true))
+	m := map[time.Duration]time.Duration{time.Second: time.Minute, time.Minute: time.Hour, time.Hour: time.Second}
+	const want = `{"1":60,"3600":1,"60":3600}`
+
+	b, err := json.Marshal(m, opts)
+	if err != nil || string(b) != want {
+		t.Fatalf("Marshal = %s, %v, want %s", b, err, want)
+	}
+
+	var got map[time.Duration]time.Duration
+	if err := json.Unmarshal(b, &got, opts); err != nil || len(got) != len(m) || got[time.Hour] != time.Second {
+		t.Errorf("Unmarshal(%s) = %v, %v, want %v", b, got, err, m)
+	}
+}
+
+func TestUnmarshalNull(t *testing.T) {
+	opts := With(ISO8601)
+	v := object{D: time.Hour}
+
+	err := json.Unmarshal([]byte(`{"D":null}`), &v, opts)
+	if err != nil || v.D != 0 {
+		t.Errorf("Unmarshal(null) = %v, %v, want 0", v.D, err)
+	}
+}
+
+func TestUnmarshalEscapedString(t *testing.T) {
+	opts := With(ISO8601)
+
+	// An escape at the start, in the middle, and at the end, each spelling "PT1H".
+	inputs := []string{`"\u0050T1H"`, `"P\u0054\u0031H"`, `"PT1\u0048"`}
+
+	for _, in := range inputs {
+		var d time.Duration
+		err := json.Unmarshal([]byte(in), &d, opts)
+		if err != nil || d != time.Hour {
+			t.Errorf("Unmarshal(%s) = %v, %v, want 1h", in, d, err)
 		}
 	}
 }
 
-func TestUnmarshalNullAndEscapes(t *testing.T) {
-	v := struct{ D time.Duration }{D: time.Hour}
-	if err := json.Unmarshal([]byte(`{"D":null}`), &v, With(ISO8601)); err != nil || v.D != 0 {
-		t.Errorf("null: D = %v, %v", v.D, err)
-	}
-	if err := json.Unmarshal([]byte(`{"D":"PT1\u0048"}`), &v, With(ISO8601)); err != nil || v.D != time.Hour {
-		t.Errorf("escaped: D = %v, %v", v.D, err)
-	}
-}
+func TestV2StillHasNoDurationDefault(t *testing.T) {
+	p := samplePayload()
 
-func TestPlainV2Fails(t *testing.T) {
-	if _, err := json.Marshal(samplePayload()); err == nil {
+	if _, err := json.Marshal(p); err == nil {
 		t.Fatal("encoding/json/v2 now has a default for time.Duration; revisit this package")
+	}
+}
+
+func TestStringTagQuotesNumericFormats(t *testing.T) {
+	type config struct {
+		Timeout time.Duration `json:",string"`
+		Backoff time.Duration
+	}
+
+	opts := With(Sec)
+	v := config{Timeout: d90, Backoff: d90}
+	const want = `{"Timeout":"5400.5","Backoff":5400.5}`
+
+	b, err := json.Marshal(v, opts)
+	if err != nil || string(b) != want {
+		t.Errorf("Marshal = %s, %v, want %s", b, err, want)
+	}
+
+	var got config
+	if err := json.Unmarshal([]byte(want), &got, opts); err != nil || got != v {
+		t.Errorf("Unmarshal(%s) = %+v, %v, want %+v", want, got, err, v)
+	}
+
+	// As for an int with the option, a JSON number is rejected.
+	unquoted := []byte(`{"Timeout":5400.5}`)
+	if err := json.Unmarshal(unquoted, &got, opts); err == nil {
+		t.Errorf("Unmarshal(%s) succeeded, want an error", unquoted)
+	}
+
+	isoOpts := With(ISO8601)
+	const wantISO = `{"Timeout":"PT1H30M0.5S","Backoff":"PT1H30M0.5S"}`
+
+	b, err = json.Marshal(v, isoOpts)
+	if err != nil || string(b) != wantISO {
+		t.Errorf("Marshal = %s, %v, want %s", b, err, wantISO)
+	}
+}
+
+func TestNamedTypesAreNotAffected(t *testing.T) {
+	type TTL time.Duration
+
+	opts := With(ISO8601)
+	ttl := TTL(d90)
+	const want = `5400500000000`
+
+	b, err := json.Marshal(ttl, opts)
+	if err != nil || string(b) != want {
+		t.Errorf("Marshal(TTL) = %s, %v, want %s, as for any int64", b, err, want)
 	}
 }
 
 func TestJoinWithOwnMarshalers(t *testing.T) {
 	type ID string
-	own := json.MarshalToFunc(func(enc *jsontext.Encoder, id ID) error {
-		return enc.WriteToken(jsontext.String("id-" + string(id)))
-	})
-	opts := json.WithMarshalers(json.JoinMarshalers(own, Marshalers(Units)))
-	b, err := json.Marshal(struct {
+
+	type record struct {
 		ID ID
 		D  time.Duration
-	}{"x", time.Second}, opts)
-	if err != nil || string(b) != `{"ID":"id-x","D":"1s"}` {
-		t.Errorf("got %s, %v", b, err)
+	}
+
+	writeID := func(enc *jsontext.Encoder, id ID) error {
+		token := jsontext.String("id-" + string(id))
+		return enc.WriteToken(token)
+	}
+
+	ids := json.MarshalToFunc(writeID)
+	durations := Marshalers(Units)
+	opts := json.WithMarshalers(json.JoinMarshalers(ids, durations))
+
+	v := record{ID: "x", D: time.Second}
+	const want = `{"ID":"id-x","D":"1s"}`
+
+	b, err := json.Marshal(v, opts)
+	if err != nil || string(b) != want {
+		t.Errorf("Marshal = %s, %v, want %s", b, err, want)
 	}
 }
 
 func TestEncoderStreaming(t *testing.T) {
+	opts := With(ISO8601)
+	durations := []time.Duration{time.Second, 1500 * time.Millisecond}
+	const want = "\"PT1S\"\n\"PT1.5S\"\n"
+
 	var sb strings.Builder
-	enc := jsontext.NewEncoder(&sb, With(ISO8601))
-	for _, d := range []time.Duration{time.Second, 1500 * time.Millisecond} {
+	enc := jsontext.NewEncoder(&sb, opts)
+
+	for _, d := range durations {
 		if err := json.MarshalEncode(enc, d); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := sb.String(); got != "\"PT1S\"\n\"PT1.5S\"\n" {
-		t.Errorf("got %q", got)
+
+	if got := sb.String(); got != want {
+		t.Errorf("stream = %q, want %q", got, want)
 	}
 }
 
-// TestConcurrentUse shares one options value between goroutines, as a
-// package-level options variable would be. It only finds something when
-// run with -race, which CI does.
+// TestConcurrentUse only finds a data race when run with -race, as CI does.
 func TestConcurrentUse(t *testing.T) {
+	p := samplePayload()
+
 	for _, f := range Formats() {
 		opts := With(f)
-		want, err := json.Marshal(samplePayload(), opts)
+
+		want, err := json.Marshal(p, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		var wg sync.WaitGroup
 		for range 8 {
 			wg.Go(func() {
 				for range 50 {
-					b, err := json.Marshal(samplePayload(), opts)
-					if err != nil || string(b) != string(want) {
-						t.Errorf("%s: Marshal = %s, %v; want %s", f, b, err, want)
+					b, err := json.Marshal(p, opts)
+					if err != nil || !bytes.Equal(b, want) {
+						t.Errorf("%s: Marshal = %s, %v, want %s", f, b, err, want)
 						return
 					}
+
 					var got payload
 					if err := json.Unmarshal(b, &got, opts); err != nil || got.TTL != d90 {
-						t.Errorf("%s: Unmarshal = %v, %v; want %v", f, got.TTL, err, d90)
+						t.Errorf("%s: Unmarshal = %v, %v, want %v", f, got.TTL, err, d90)
 						return
 					}
 				}
 			})
 		}
+
 		wg.Wait()
 	}
 }
@@ -207,61 +340,209 @@ func TestAlsoAccept(t *testing.T) {
 		D time.Duration                   `json:"d"`
 		M map[time.Duration]time.Duration `json:"m"`
 	}
+
 	opts := With(ISO8601, AlsoAccept(Nano))
-	for _, in := range []string{
-		`{"d":5400500000000,"m":{"60000000000":3600000000000}}`, // as encoding/json (v1) writes it
-		`{"d":"PT1H30M0.5S","m":{"PT1M":"PT1H"}}`,
-		`{"d":"PT1H30M0.5S","m":{"60000000000":"PT1H"}}`, // mixed
-	} {
-		var v doc
-		if err := json.Unmarshal([]byte(in), &v, opts); err != nil || v.D != d90 || v.M[time.Minute] != time.Hour {
-			t.Errorf("Unmarshal(%s) = %+v, %v", in, v, err)
-		}
-	}
-	// Only the first format is written.
-	b, err := json.Marshal(doc{D: d90, M: map[time.Duration]time.Duration{time.Minute: time.Hour}}, opts)
-	if want := `{"d":"PT1H30M0.5S","m":{"PT1M":"PT1H"}}`; err != nil || string(b) != want {
-		t.Errorf("Marshal = %s, %v; want %s", b, err, want)
+
+	reads := map[string]string{
+		"v1 nanoseconds":       `{"d":5400500000000,"m":{"60000000000":3600000000000}}`,
+		"ISO 8601":             `{"d":"PT1H30M0.5S","m":{"PT1M":"PT1H"}}`,
+		"both in one document": `{"d":"PT1H30M0.5S","m":{"60000000000":"PT1H"}}`,
 	}
 
-	// A numeric format is a JSON string with StringifyNumbers.
-	var d time.Duration
-	if err := json.Unmarshal([]byte(`"5400.5"`), &d, With(Units, AlsoAccept(Sec)), json.StringifyNumbers(true)); err != nil || d != d90 {
-		t.Errorf("Units+Sec stringified: %v, %v", d, err)
+	for name, in := range reads {
+		t.Run("reads "+name, func(t *testing.T) {
+			var v doc
+			err := json.Unmarshal([]byte(in), &v, opts)
+			if err != nil || v.D != d90 || v.M[time.Minute] != time.Hour {
+				t.Errorf("Unmarshal(%s) = %+v, %v", in, v, err)
+			}
+		})
 	}
-	// Duplicates and nil options are harmless.
-	err = json.Unmarshal([]byte(`"x"`), &d, With(ISO8601, AlsoAccept(ISO8601), nil))
-	if err == nil || strings.Contains(err.Error(), "accepted") {
-		t.Errorf("duplicates: err = %v, want the plain ISO 8601 error", err)
-	}
+
+	t.Run("writes only the first format", func(t *testing.T) {
+		v := doc{
+			D: d90,
+			M: map[time.Duration]time.Duration{time.Minute: time.Hour},
+		}
+
+		const want = `{"d":"PT1H30M0.5S","m":{"PT1M":"PT1H"}}`
+
+		b, err := json.Marshal(v, opts)
+		if err != nil || string(b) != want {
+			t.Errorf("Marshal = %s, %v, want %s", b, err, want)
+		}
+	})
+
+	t.Run("reads a numeric format as a string with StringifyNumbers", func(t *testing.T) {
+		unitsOrSec := With(Units, AlsoAccept(Sec))
+		stringify := json.StringifyNumbers(true)
+
+		var d time.Duration
+		err := json.Unmarshal([]byte(`"5400.5"`), &d, unitsOrSec, stringify)
+		if err != nil || d != d90 {
+			t.Errorf("Unmarshal = %v, %v, want %v", d, err, d90)
+		}
+	})
+
+	t.Run("keeps its formats when the caller changes the slice", func(t *testing.T) {
+		formats := []Format{Units}
+		accept := AlsoAccept(formats...)
+		formats[0] = Nano
+
+		secOrUnits := With(Sec, accept)
+
+		var d time.Duration
+		err := json.Unmarshal([]byte(`"1h"`), &d, secOrUnits)
+		if err != nil || d != time.Hour {
+			t.Errorf("Unmarshal = %v, %v, want 1h", d, err)
+		}
+	})
+
+	t.Run("ignores duplicates and nil options", func(t *testing.T) {
+		withDuplicates := With(ISO8601, AlsoAccept(ISO8601), nil)
+
+		var d time.Duration
+		err := json.Unmarshal([]byte(`"x"`), &d, withDuplicates)
+		if err == nil || strings.Contains(err.Error(), "accepted") {
+			t.Errorf("Unmarshal error = %v, want the error of ISO 8601 alone", err)
+		}
+	})
 }
 
 func TestAlsoAcceptErrors(t *testing.T) {
 	opts := With(ISO8601, AlsoAccept(Nano))
+
 	tests := []struct {
+		name    string
 		in      string
-		wantErr error  // checked with errors.Is, if set
-		wantMsg string // in the message
+		wantErr error
+		wantMsg string
 	}{
-		{`{"D":"1h30m"}`, strconv.ErrSyntax, `invalid ISO 8601 duration "1h30m": invalid syntax (accepted: iso8601 or nano)`},
-		{`{"D":"P1D"}`, ErrNominalUnits, "(accepted: iso8601 or nano)"},
-		{`{"D":1e3}`, strconv.ErrSyntax, `invalid duration "1e3"`},
-		{`{"D":"5400"}`, strconv.ErrSyntax, "invalid ISO 8601 duration"}, // Nano is a number outside object names
-		{`{"D":true}`, nil, "iso8601 or nano duration must be a JSON string or number, got true"},
-		{`{"D":[]}`, nil, "must be a JSON string or number, got ["},
+		{"units", `{"D":"1h30m"}`, strconv.ErrSyntax, `"1h30m" in format iso8601 or nano: invalid syntax`},
+		{"calendar units", `{"D":"P1D"}`, ErrCalendarUnits, "iso8601 or nano: calendar units have no fixed length"},
+		{"exponent", `{"D":1e3}`, strconv.ErrSyntax, `invalid duration "1e3"`},
+		{"nanoseconds as a string value", `{"D":"5400"}`, strconv.ErrSyntax, "in format iso8601"},
+		{"boolean", `{"D":true}`, nil, `"true" in format iso8601 or nano: want a JSON string or number`},
+		{"array", `{"D":[]}`, nil, "want a JSON string or number"},
+		{"object", `{"D":{}}`, nil, "want a JSON string or number"},
 	}
+
 	for _, tt := range tests {
-		var v struct{ D time.Duration }
-		err := json.Unmarshal([]byte(tt.in), &v, opts)
-		if err == nil || !strings.Contains(err.Error(), tt.wantMsg) || (tt.wantErr != nil && !errors.Is(err, tt.wantErr)) {
-			t.Errorf("Unmarshal(%s) err = %v, want %q (%v)", tt.in, err, tt.wantMsg, tt.wantErr)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			var v object
+			err := json.Unmarshal([]byte(tt.in), &v, opts)
+
+			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Fatalf("Unmarshal(%s) error = %v, want one containing %q", tt.in, err, tt.wantMsg)
+			}
+
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Errorf("Unmarshal(%s) error = %v, want one wrapping %v", tt.in, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestAlsoAcceptReportsTheTellingCause checks that a format that recognized the duration but not its value
+// decides the cause, whichever comes first, as for a number too large for nano.
+func TestAlsoAcceptReportsTheTellingCause(t *testing.T) {
+	type config struct {
+		D time.Duration
+		M map[time.Duration]int
+	}
+
+	unitsOrISO := With(Units, AlsoAccept(ISO8601))
+	isoOrUnits := With(ISO8601, AlsoAccept(Units))
+	isoOrNano := With(ISO8601, AlsoAccept(Nano))
+	stringified := json.JoinOptions(isoOrNano, json.StringifyNumbers(true))
+
+	tests := []struct {
+		name    string
+		in      string
+		opts    json.Options
+		wantErr error
+		wantMsg string
+	}{
+		{"calendar units second", `{"D":"P1D"}`, unitsOrISO, ErrCalendarUnits, "no fixed length"},
+		{"calendar units first", `{"D":"P1D"}`, isoOrUnits, ErrCalendarUnits, "no fixed length"},
+		{"range in a map key", `{"M":{"99999999999999999999":1}}`, isoOrNano, strconv.ErrRange, "range"},
+		{"range with StringifyNumbers", `{"D":"99999999999999999999"}`, stringified, strconv.ErrRange, "range"},
+		{"first syntax error", `{"D":"1x"}`, isoOrUnits, strconv.ErrSyntax, "iso8601 or units: invalid syntax"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var v config
+			err := json.Unmarshal([]byte(tt.in), &v, tt.opts)
+			if !errors.Is(err, tt.wantErr) || !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("Unmarshal(%s) error = %v, want one wrapping %v and containing %q",
+					tt.in, err, tt.wantErr, tt.wantMsg)
+			}
+		})
+	}
+}
+
+// TestDecodeErrorsAreSemanticErrors checks that decoding reports errors as encoding/json/v2 does for other types,
+// with the JSON kind, the Go type, and the JSON pointer, so that code that handles its errors also handles durations.
+func TestDecodeErrorsAreSemanticErrors(t *testing.T) {
+	type config struct {
+		Timeout time.Duration
+		Backoff ISO8601Duration
+		Limits  map[time.Duration]int
+	}
+
+	strict := With(ISO8601)
+	both := With(ISO8601, AlsoAccept(Nano))
+	duration := reflect.TypeFor[time.Duration]()
+	wrapper := reflect.TypeFor[ISO8601Duration]()
+
+	tests := []struct {
+		name        string
+		in          string
+		opts        json.Options
+		wantKind    jsontext.Kind
+		wantType    reflect.Type
+		wantPointer jsontext.Pointer
+	}{
+		{"invalid syntax", `{"Timeout":"90s"}`, strict, '"', duration, "/Timeout"},
+		{"calendar units", `{"Timeout":"P1D"}`, strict, '"', duration, "/Timeout"},
+		{"out of range", `{"Timeout":99999999999999999999}`, both, '0', duration, "/Timeout"},
+		{"number for ISO8601", `{"Timeout":90}`, strict, '0', duration, "/Timeout"},
+		{"boolean for AlsoAccept", `{"Timeout":true}`, both, 't', duration, "/Timeout"},
+		{"map key", `{"Limits":{"90s":1}}`, strict, '"', duration, "/Limits/90s"},
+		{"invalid syntax in a wrapper type", `{"Backoff":"90s"}`, strict, '"', wrapper, "/Backoff"},
+		{"array for a wrapper type", `{"Backoff":[]}`, strict, '[', wrapper, "/Backoff"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var v config
+			err := json.Unmarshal([]byte(tt.in), &v, tt.opts)
+
+			semantic, ok := errors.AsType[*json.SemanticError](err)
+			if !ok {
+				t.Fatalf("error %v, want a json.SemanticError", err)
+			}
+
+			if semantic.JSONKind != tt.wantKind || semantic.GoType != tt.wantType {
+				t.Errorf("error has JSONKind %v and GoType %v, want %v and %v",
+					semantic.JSONKind, semantic.GoType, tt.wantKind, tt.wantType)
+			}
+
+			if semantic.JSONPointer != tt.wantPointer {
+				t.Errorf("error has JSONPointer %q, want %q", semantic.JSONPointer, tt.wantPointer)
+			}
+
+			if !errors.Is(err, ErrInvalidDuration) {
+				t.Errorf("error %v does not match ErrInvalidDuration", err)
+			}
+		})
 	}
 }
 
 func TestAcceptDays(t *testing.T) {
-	const day = 24 * time.Hour
 	opts := With(ISO8601, AcceptDays())
+
 	tests := []struct {
 		in      string
 		want    time.Duration
@@ -269,114 +550,167 @@ func TestAcceptDays(t *testing.T) {
 	}{
 		{`"P1D"`, day, nil},
 		{`"p2d"`, 2 * day, nil},
-		{`"P1W"`, 7 * day, nil},
-		{`"P1W2D"`, 9 * day, nil},
+		{`"P1W"`, week, nil},
+		{`"P1W2D"`, week + 2*day, nil},
 		{`"P1DT12H"`, 36 * time.Hour, nil},
 		{`"-P1D"`, -day, nil},
 		{`"P106751DT23H47M16.854775807S"`, maxD, nil},
 		{`"P106752D"`, 0, strconv.ErrRange},
-		{`"P1Y"`, 0, ErrNominalUnits},
-		{`"P1M"`, 0, ErrNominalUnits},
-		{`"P1M1D"`, 0, ErrNominalUnits},
-		{`"P1.5D"`, 0, strconv.ErrSyntax}, // days take no fraction
-	}
-	for _, tt := range tests {
-		var d time.Duration
-		err := json.Unmarshal([]byte(tt.in), &d, opts)
-		switch {
-		case tt.wantErr == nil && (err != nil || d != tt.want):
-			t.Errorf("Unmarshal(%s) = %v, %v; want %v", tt.in, d, err, tt.want)
-		case tt.wantErr != nil && !errors.Is(err, tt.wantErr):
-			t.Errorf("Unmarshal(%s) error = %v, want %v", tt.in, err, tt.wantErr)
-		}
+		{`"P1Y"`, 0, ErrCalendarUnits},
+		{`"P1M"`, 0, ErrCalendarUnits},
+		{`"P1M1D"`, 0, ErrCalendarUnits},
+		{`"P1.5D"`, 0, strconv.ErrSyntax},
+		{`"P1DT"`, 0, strconv.ErrSyntax},
+		{`"P1D1"`, 0, strconv.ErrSyntax},
 	}
 
-	var d time.Duration
-	if err := json.Unmarshal([]byte(`"P1D"`), &d, With(ISO8601)); !errors.Is(err, ErrNominalUnits) {
-		t.Errorf("without AcceptDays: err = %v, want ErrNominalUnits", err)
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			var d time.Duration
+			err := json.Unmarshal([]byte(tt.in), &d, opts)
+
+			switch {
+			case tt.wantErr != nil && !errors.Is(err, tt.wantErr):
+				t.Errorf("Unmarshal(%s) error = %v, want %v", tt.in, err, tt.wantErr)
+			case tt.wantErr == nil && (err != nil || d != tt.want):
+				t.Errorf("Unmarshal(%s) = %v, %v, want %v", tt.in, d, err, tt.want)
+			}
+		})
 	}
-	if b, err := json.Marshal(36*time.Hour, opts); err != nil || string(b) != `"PT36H"` {
-		t.Errorf("Marshal = %s, %v; days are never written", b, err)
-	}
-	// ISO 8601 need not be the written format.
-	if err := json.Unmarshal([]byte(`"P1D"`), &d, With(Nano, AlsoAccept(ISO8601), AcceptDays())); err != nil || d != day {
-		t.Errorf("Nano+ISO8601: %v, %v; want 24h", d, err)
-	}
-	// Other formats are not affected.
-	if err := json.Unmarshal([]byte(`"1h"`), &d, With(Units, AcceptDays())); err != nil || d != time.Hour {
-		t.Errorf("Units: %v, %v; want 1h", d, err)
-	}
+
+	t.Run("days stay rejected without it", func(t *testing.T) {
+		withoutDays := With(ISO8601)
+
+		var d time.Duration
+		err := json.Unmarshal([]byte(`"P1D"`), &d, withoutDays)
+		if !errors.Is(err, ErrCalendarUnits) {
+			t.Errorf("Unmarshal error = %v, want ErrCalendarUnits", err)
+		}
+	})
+
+	t.Run("never writes days", func(t *testing.T) {
+		d := 36 * time.Hour
+		const want = `"PT36H"`
+
+		b, err := json.Marshal(d, opts)
+		if err != nil || string(b) != want {
+			t.Errorf("Marshal = %s, %v, want %s", b, err, want)
+		}
+	})
+
+	t.Run("works with ISO 8601 from AlsoAccept", func(t *testing.T) {
+		nanoOrDays := With(Nano, AlsoAccept(ISO8601), AcceptDays())
+
+		var d time.Duration
+		err := json.Unmarshal([]byte(`"P1D"`), &d, nanoOrDays)
+		if err != nil || d != day {
+			t.Errorf("Unmarshal = %v, %v, want %v", d, err, day)
+		}
+	})
+
+	t.Run("leaves other formats alone", func(t *testing.T) {
+		unitsWithDays := With(Units, AcceptDays())
+
+		var d time.Duration
+		err := json.Unmarshal([]byte(`"1h"`), &d, unitsWithDays)
+		if err != nil || d != time.Hour {
+			t.Errorf("Unmarshal = %v, %v, want 1h", d, err)
+		}
+	})
 }
 
 func TestUnmarshalSyntaxError(t *testing.T) {
-	var v struct{ D time.Duration }
-	err := json.Unmarshal([]byte(`{"D":tru}`), &v, With(Nano))
-	var serr *jsontext.SyntacticError
-	if !errors.As(err, &serr) {
-		t.Errorf("err = %v, want a *jsontext.SyntacticError", err)
+	opts := With(Nano)
+
+	var v object
+	err := json.Unmarshal([]byte(`{"D":tru}`), &v, opts)
+
+	if _, ok := errors.AsType[*jsontext.SyntacticError](err); !ok {
+		t.Errorf("Unmarshal error = %v, want a *jsontext.SyntacticError", err)
 	}
 }
 
 func TestUnmarshalInvalidUTF8(t *testing.T) {
-	// With AllowInvalidUTF8 the decoder passes invalid bytes through;
-	// they must still be rejected, with or without escapes in the string.
-	for _, in := range []string{"\"PT1H\xff\"", "\"PT1\\u0048\xff\""} {
-		var d time.Duration
-		if err := json.Unmarshal([]byte(in), &d, With(ISO8601), jsontext.AllowInvalidUTF8(true)); err == nil {
-			t.Errorf("Unmarshal(%q) = %v, want error", in, d)
-		}
+	opts := json.JoinOptions(With(ISO8601), jsontext.AllowInvalidUTF8(true))
+
+	tests := map[string]string{
+		"without escapes": "\"PT1H\xff\"",
+		"with escapes":    "\"PT1\\u0048\xff\"",
+		"lone surrogate":  "\"\\ud800PT1H\"",
+	}
+
+	for name, in := range tests {
+		t.Run(name, func(t *testing.T) {
+			var d time.Duration
+			err := json.Unmarshal([]byte(in), &d, opts)
+			if !errors.Is(err, ErrInvalidDuration) || !errors.Is(err, strconv.ErrSyntax) {
+				t.Errorf("Unmarshal(%q) = %v, %v, want an error that matches ErrInvalidDuration and strconv.ErrSyntax",
+					in, d, err)
+			}
+		})
 	}
 }
 
-// FuzzUnmarshal decodes arbitrary JSON with every format. Decoding must
-// never panic, and whatever decodes must survive a second round trip
-// unchanged.
+// FuzzUnmarshal decodes arbitrary JSON with every format, and with the options that combine formats.
+// Whatever decodes must survive a second round trip unchanged.
 func FuzzUnmarshal(f *testing.F) {
-	for _, s := range []string{
-		`{"d":"PT1H30M0.5S","p":null,"l":["1s","-1ms"],"m":{"60":3600}}`,
-		`{"d":5400.5,"l":[1,-0.001],"m":{"PT1M":"PT1H"}}`,
-		`{"d":"1:30:00.5","m":{"0:01:00":"1:00:00"}}`,
-		`{"d":"5400.500s","p":"1s"}`,
-		`{"d":"1h30m","l":[null]}`,
-		`[1,2,3]`, `null`, `{"d":"PT1H"}`,
-	} {
-		f.Add([]byte(s))
-	}
 	type doc struct {
 		D time.Duration                   `json:"d"`
 		P *time.Duration                  `json:"p"`
 		L []time.Duration                 `json:"l"`
 		M map[time.Duration]time.Duration `json:"m"`
 	}
-	// Every format alone, and every string format that also accepts Nano.
+
 	type config struct {
 		name string
 		opts json.Options
 	}
+
+	seeds := []string{
+		`{"d":"PT1H30M0.5S","p":null,"l":["1s","-1ms"],"m":{"60":3600}}`,
+		`{"d":5400.5,"l":[1,-0.001],"m":{"PT1M":"PT1H"}}`,
+		`{"d":"1h30m","l":[null]}`,
+		`{"d":"P1DT2H","p":"PT1S"}`,
+		`[1,2,3]`, `null`, `{"d":"PT1H"}`,
+	}
+
+	for _, s := range seeds {
+		f.Add([]byte(s))
+	}
+
 	var configs []config
+	add := func(name string, opts json.Options) {
+		deterministic := json.JoinOptions(opts, json.Deterministic(true))
+		configs = append(configs, config{name: name, opts: deterministic})
+	}
+
 	for _, fm := range Formats() {
-		configs = append(configs, config{string(fm), json.JoinOptions(With(fm), json.Deterministic(true))})
-		if !fm.IsNumeric() {
-			opts := json.JoinOptions(With(fm, AlsoAccept(Nano)), json.Deterministic(true))
-			configs = append(configs, config{string(fm) + "+nano", opts})
+		add(string(fm), With(fm))
+		if !fm.mustCodec().numeric() {
+			add(string(fm)+"+nano", With(fm, AlsoAccept(Nano)))
 		}
 	}
-	configs = append(configs, config{"iso8601+days", json.JoinOptions(With(ISO8601, AcceptDays()), json.Deterministic(true))})
+
+	add("iso8601+days", With(ISO8601, AcceptDays()))
+
 	f.Fuzz(func(t *testing.T, in []byte) {
 		for _, c := range configs {
 			var v doc
 			if json.Unmarshal(in, &v, c.opts) != nil {
 				continue
 			}
+
 			b1, err := json.Marshal(v, c.opts)
 			if err != nil {
 				t.Fatalf("%s: Marshal after Unmarshal(%q): %v", c.name, in, err)
 			}
+
 			var w doc
 			if err := json.Unmarshal(b1, &w, c.opts); err != nil {
 				t.Fatalf("%s: Unmarshal(%s): %v", c.name, b1, err)
 			}
-			if b2, _ := json.Marshal(w, c.opts); string(b1) != string(b2) {
+
+			if b2, _ := json.Marshal(w, c.opts); !bytes.Equal(b1, b2) {
 				t.Fatalf("%s: round trip changed\n%s\n%s", c.name, b1, b2)
 			}
 		}

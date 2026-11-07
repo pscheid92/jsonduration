@@ -1,7 +1,3 @@
-// Copyright 2026 Patrick Scheid. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package jsonduration
 
 import (
@@ -11,10 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/big"
-	"math/rand/v2"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 )
@@ -57,320 +49,137 @@ func TestFormat(t *testing.T) {
 		{ISO8601, maxD, "PT2562047H47M16.854775807S"},
 		{ISO8601, minD, "-PT2562047H47M16.854775808S"},
 	}
+
 	for _, tt := range tests {
-		got := tt.f.Format(tt.d)
-		if got != tt.want {
-			t.Errorf("%s.Format(%d) = %q, want %q", tt.f, int64(tt.d), got, tt.want)
-			continue
-		}
-		back, err := tt.f.Parse(got)
-		if err != nil || back != tt.d {
-			t.Errorf("%s.Parse(%q) = %v, %v; want %v", tt.f, got, back, err, tt.d)
-		}
-	}
-}
-
-func TestParse(t *testing.T) {
-	tests := []struct {
-		f       Format
-		in      string
-		want    time.Duration
-		wantErr error // nil means success
-	}{
-		// Base-10.
-		{Sec, "-0", 0, nil},
-		{Sec, "1.5", 1500 * time.Millisecond, nil},
-		{Sec, "0.0000000019", time.Nanosecond, nil}, // sub-nanosecond digits are truncated
-		{Sec, "", 0, strconv.ErrSyntax},
-		{Sec, "-", 0, strconv.ErrSyntax},
-		{Sec, "+1", 0, strconv.ErrSyntax},
-		{Sec, "01", 0, strconv.ErrSyntax},
-		{Sec, "1.", 0, strconv.ErrSyntax},
-		{Sec, ".5", 0, strconv.ErrSyntax},
-		{Sec, "1e3", 0, strconv.ErrSyntax},
-		{Sec, "1.5x", 0, strconv.ErrSyntax},
-		{Sec, "9223372036.854775808", 0, strconv.ErrRange},
-		{Sec, "-9223372036.854775809", 0, strconv.ErrRange},
-		{Nano, "9223372036854775808", 0, strconv.ErrRange},
-		{Nano, "99999999999999999999999", 0, strconv.ErrRange},
-		{Nano, "1.5", 1, nil}, // fractions of the unit are truncated
-
-		// ISO 8601.
-		{ISO8601, "PT1H1S", time.Hour + time.Second, nil}, // invalid per RFC 3339 Appendix A, valid ISO 8601
-		{ISO8601, "pt1h30m", 90 * time.Minute, nil},
-		{ISO8601, "+PT1S", time.Second, nil},
-		{ISO8601, "-PT1.5S", -1500 * time.Millisecond, nil},
-		{ISO8601, "PT0,5S", 500 * time.Millisecond, nil},
-		{ISO8601, "PT1.5H", d90 - 500*time.Millisecond, nil},
-		{ISO8601, "PT007S", 7 * time.Second, nil},
-		{ISO8601, "-PT0S", 0, nil},
-		{ISO8601, "P1D", 0, ErrNominalUnits},
-		{ISO8601, "P1W", 0, ErrNominalUnits},
-		{ISO8601, "P1Y2M", 0, ErrNominalUnits},
-		{ISO8601, "P1DT1H", 0, ErrNominalUnits},
-		{ISO8601, "", 0, strconv.ErrSyntax},
-		{ISO8601, "P", 0, strconv.ErrSyntax},
-		{ISO8601, "PT", 0, strconv.ErrSyntax},
-		{ISO8601, "T1S", 0, strconv.ErrSyntax},
-		{ISO8601, "PT-1S", 0, strconv.ErrSyntax},
-		{ISO8601, "PT1S1M", 0, strconv.ErrSyntax},
-		{ISO8601, "PT1.5H30M", 0, strconv.ErrSyntax},
-		{ISO8601, "PT1.S", 0, strconv.ErrSyntax},
-		{ISO8601, "PT1.5e1H", 0, strconv.ErrSyntax},
-		{ISO8601, "P1.5D", 0, strconv.ErrSyntax},
-		{ISO8601, "PT1X", 0, strconv.ErrSyntax},
-		{ISO8601, "PT2562048H", 0, strconv.ErrRange},
-		{ISO8601, "-PT2562047H47M16.854775809S", 0, strconv.ErrRange},
-
-		// Units: the grammar of time.ParseDuration, with exact fractions.
-		{Units, "1h30m", 90 * time.Minute, nil},
-		{Units, "1us", time.Microsecond, nil},
-		{Units, "1µs", time.Microsecond, nil}, // micro sign
-		{Units, "1μs", time.Microsecond, nil}, // Greek mu
-		{Units, "+1.5h", 90 * time.Minute, nil},
-		{Units, ".5s", 500 * time.Millisecond, nil},
-		{Units, "5.s", 5 * time.Second, nil},
-		{Units, "01s", time.Second, nil},
-		{Units, "1h.5m", time.Hour + 30*time.Second, nil},
-		{Units, "0", 0, nil},
-		{Units, "-0", 0, nil},
-		{Units, "0.0000000019s", time.Nanosecond, nil}, // truncated
-		{Units, "0.0000000000002h", 0, nil},            // 0.72ns, truncated
-		{Units, "-9223372036854775808ns", minD, nil},
-		{Units, "", 0, strconv.ErrSyntax},
-		{Units, "-", 0, strconv.ErrSyntax},
-		{Units, "1", 0, strconv.ErrSyntax}, // missing unit
-		{Units, "1x", 0, strconv.ErrSyntax},
-		{Units, ".s", 0, strconv.ErrSyntax},
-		{Units, " 1s", 0, strconv.ErrSyntax},
-		{Units, "1h-1m", 0, strconv.ErrSyntax},
-		{Units, "PT1H", 0, strconv.ErrSyntax},
-		{Units, "2562048h", 0, strconv.ErrRange},
-		{Units, "9223372036854775808ns", 0, strconv.ErrRange},
-		{Units, "99999999999999999999999ns", 0, strconv.ErrRange},
-		{Units, "2562047h47m16.854775807s1ns", 0, strconv.ErrRange},
-	}
-	for _, tt := range tests {
-		got, err := tt.f.Parse(tt.in)
-		switch {
-		case tt.wantErr == nil && err != nil:
-			t.Errorf("%s.Parse(%q) error: %v", tt.f, tt.in, err)
-		case tt.wantErr != nil && !errors.Is(err, tt.wantErr):
-			t.Errorf("%s.Parse(%q) error = %v, want %v", tt.f, tt.in, err, tt.wantErr)
-		case tt.wantErr == nil && got != tt.want:
-			t.Errorf("%s.Parse(%q) = %v, want %v", tt.f, tt.in, got, tt.want)
-		}
-	}
-	// Units errors say what is wrong, like those of time.ParseDuration.
-	for in, want := range map[string]string{
-		"1":  `invalid duration "1": missing unit: invalid syntax`,
-		"1x": `invalid duration "1x": unknown unit "x": invalid syntax`,
-	} {
-		if _, err := Units.Parse(in); err == nil || err.Error() != want {
-			t.Errorf("Units.Parse(%q) error = %v, want %s", in, err, want)
-		}
-	}
-}
-
-// FuzzUnitsMatchesParseDuration checks that Units accepts exactly what
-// time.ParseDuration accepts, with the same value. time.ParseDuration
-// computes each fraction through float64, so each component with a
-// fraction may come out 1ns apart, which can also move a value just past
-// the range of a time.Duration.
-func FuzzUnitsMatchesParseDuration(f *testing.F) {
-	for _, s := range []string{
-		"1h30m", "1.5us", "1µs", "1μs", "0", "-0", "+.5s", "5.s", "1h1h", "0.1h0.1h0.1h",
-		"9223372036854775807ns", "-9223372036854775808ns", "9223372036854775808ns",
-		"2562047h47m16.854775807s", "2562047h47m16.854775808s", "-2562047h47m16.854775808s",
-		"1.0000000000000000000001s", "0.123456789012345h", ".s", "1", "", "1x", "1h-1m",
-	} {
-		f.Add(s)
-	}
-	f.Fuzz(func(t *testing.T, s string) {
-		want, wantErr := time.ParseDuration(s)
-		got, err := Units.Parse(s)
-		slack := uint64(strings.Count(s, "."))
-		near := func(a, b time.Duration) bool { // in uint64, so no difference wraps
-			if a < b {
-				a, b = b, a
+		t.Run(string(tt.f)+"/"+tt.want, func(t *testing.T) {
+			got := tt.f.Format(tt.d)
+			if got != tt.want {
+				t.Fatalf("%s.Format(%d) = %q, want %q", tt.f, int64(tt.d), got, tt.want)
 			}
-			return uint64(a)-uint64(b) <= slack
-		}
-		nearLimit := func(d time.Duration) bool { return near(d, maxD) || near(d, minD) }
-		switch {
-		case err == nil && wantErr == nil && !near(got, want):
-			t.Fatalf("Parse(%q) = %d, time.ParseDuration = %d", s, int64(got), int64(want))
-		case err == nil && wantErr != nil && !nearLimit(got):
-			t.Fatalf("Parse(%q) = %d, but time.ParseDuration fails: %v", s, int64(got), wantErr)
-		case err != nil && wantErr == nil && !nearLimit(want):
-			t.Fatalf("Parse(%q) fails: %v, but time.ParseDuration = %d", s, err, int64(want))
-		}
-		if err != nil && !errors.Is(err, strconv.ErrSyntax) && !errors.Is(err, strconv.ErrRange) {
-			t.Fatalf("Parse(%q) error %v wraps neither ErrSyntax nor ErrRange", s, err)
-		}
-	})
+
+			if back, err := tt.f.Parse(got); err != nil || back != tt.d {
+				t.Errorf("%s.Parse(%q) = %v, %v, want %v", tt.f, got, back, err, tt.d)
+			}
+		})
+	}
 }
 
-func TestFormatText(t *testing.T) {
+// TestLongestOutput computes the longest output from the extremes, where every format writes the most digits,
+// and requires maxPossibleOutputLength to match it exactly. FuzzRoundTrip checks that no other duration writes more.
+func TestLongestOutput(t *testing.T) {
+	extremes := []time.Duration{maxD, minD}
+
+	longest := 0
+	for _, f := range Formats() {
+		for _, d := range extremes {
+			longest = max(longest, len(f.Format(d)))
+		}
+	}
+
+	if longest != maxPossibleOutputLength {
+		t.Errorf("the longest output has %d bytes, but longestOutput = %d", longest, maxPossibleOutputLength)
+	}
+}
+
+type parseTest struct {
+	in      string
+	want    time.Duration
+	wantErr error
+}
+
+func testParse(t *testing.T, f Format, tests []parseTest) {
+	t.Helper()
+
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, err := f.Parse(tt.in)
+
+			switch {
+			case tt.wantErr != nil && (!errors.Is(err, tt.wantErr) || got != 0):
+				t.Errorf("%s.Parse(%q) = %v, %v, want 0 and an error caused by %v", f, tt.in, got, err, tt.wantErr)
+			case tt.wantErr == nil && (err != nil || got != tt.want):
+				t.Errorf("%s.Parse(%q) = %v, %v, want %v", f, tt.in, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatTextRoundTrip(t *testing.T) {
 	for _, f := range Formats() {
 		b, err := f.MarshalText()
 		if err != nil || string(b) != string(f) {
-			t.Errorf("%s.MarshalText = %s, %v", f, b, err)
+			t.Errorf("%s.MarshalText() = %s, %v", f, b, err)
 		}
+
 		var g Format
 		if err := g.UnmarshalText(b); err != nil || g != f {
-			t.Errorf("UnmarshalText(%q) = %q, %v; want %q", b, g, err, f)
+			t.Errorf("UnmarshalText(%q) = %q, %v, want %q", b, g, err, f)
 		}
 	}
+}
 
-	// Names match exactly, so other spellings are rejected, and the error
-	// lists the names. A failed decoding leaves the format unchanged.
+func TestFormatMarshalTextInvalid(t *testing.T) {
+	bogus := Format("bogus")
+
+	if _, err := bogus.MarshalText(); err == nil {
+		t.Error(`Format("bogus").MarshalText() succeeded, want an error`)
+	}
+}
+
+func TestFormatUnmarshalTextRejectsOtherNames(t *testing.T) {
 	const names = "units, sec, milli, micro, nano, iso8601"
-	for _, in := range []string{"bogus", "ISO8601", "Nano", " sec", ""} {
-		g := Sec
-		err := g.UnmarshalText([]byte(in))
-		if want := fmt.Sprintf("jsonduration: unknown format %q, want one of %s", in, names); err == nil || err.Error() != want || g != Sec {
-			t.Errorf("UnmarshalText(%q) = %q, %v; want %q and %s", in, g, err, Sec, want)
-		}
-	}
-	if _, err := Format("bogus").MarshalText(); err == nil {
-		t.Error("MarshalText of an invalid format succeeded")
-	}
+	inputs := []string{"bogus", "ISO8601", "Nano", " sec", ""}
 
-	// Formats can come from flags and from JSON configuration.
+	for _, in := range inputs {
+		t.Run(in, func(t *testing.T) {
+			f := Sec
+			err := f.UnmarshalText([]byte(in))
+
+			want := fmt.Sprintf("unknown format %q, want one of %s", in, names)
+			if err == nil || err.Error() != want {
+				t.Errorf("UnmarshalText(%q) error = %v, want %s", in, err, want)
+			}
+
+			if f != Sec {
+				t.Errorf("UnmarshalText(%q) changed the format to %q", in, f)
+			}
+		})
+	}
+}
+
+func TestFormatFromFlag(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var fromFlag Format
-	fs.TextVar(&fromFlag, "format", ISO8601, "duration format")
-	if err := fs.Parse([]string{"-format=nano"}); err != nil || fromFlag != Nano {
-		t.Errorf("flag nano: %q, %v; want nano", fromFlag, err)
+
+	var f Format
+	fs.TextVar(&f, "format", ISO8601, "duration format")
+
+	args := []string{"-format=nano"}
+	if err := fs.Parse(args); err != nil || f != Nano {
+		t.Errorf("-format=nano gives %q, %v, want nano", f, err)
 	}
-	if err := fs.Parse([]string{"-format=Nano"}); err == nil {
-		t.Error("flag Nano succeeded, want an error")
+
+	args = []string{"-format=Nano"}
+	if err := fs.Parse(args); err == nil {
+		t.Error("-format=Nano succeeded, want an error")
 	}
-	var cfg struct{ Format Format }
-	if err := json.Unmarshal([]byte(`{"Format":"iso8601"}`), &cfg); err != nil || cfg.Format != ISO8601 {
-		t.Errorf("JSON iso8601: %q, %v; want iso8601", cfg.Format, err)
+}
+
+func TestFormatFromJSON(t *testing.T) {
+	type config struct {
+		Format Format
 	}
-	for _, in := range []string{`{"Format":"ISO8601"}`, `{"Format":"weeks"}`} {
+
+	var cfg config
+	err := json.Unmarshal([]byte(`{"Format":"iso8601"}`), &cfg)
+	if err != nil || cfg.Format != ISO8601 {
+		t.Errorf(`{"Format":"iso8601"} gives %q, %v, want iso8601`, cfg.Format, err)
+	}
+
+	invalid := []string{`{"Format":"ISO8601"}`, `{"Format":"weeks"}`}
+	for _, in := range invalid {
 		if err := json.Unmarshal([]byte(in), &cfg); err == nil {
-			t.Errorf("JSON %s succeeded, want an error", in)
-		}
-	}
-}
-
-// TestFormatValidExact: a converted string is only valid in the exact
-// spelling of a format, and only then equal to the constant.
-func TestFormatValidExact(t *testing.T) {
-	tests := []struct {
-		in   string
-		want bool
-	}{
-		{"iso8601", true},
-		{"ISO8601", false},
-		{"Iso8601", false},
-		{"iso8601 ", false}, // a trailing space
-	}
-	for _, tt := range tests {
-		f := Format(tt.in)
-		if f.Valid() != tt.want || (f == ISO8601) != tt.want {
-			t.Errorf("Format(%q): Valid = %v, == ISO8601 is %v; want both %v", tt.in, f.Valid(), f == ISO8601, tt.want)
-		}
-	}
-}
-
-func FuzzRoundTrip(f *testing.F) {
-	for _, d := range []int64{0, 1, -1, int64(d90), math.MaxInt64, math.MinInt64, 1500} {
-		f.Add(d)
-	}
-	f.Fuzz(func(t *testing.T, n int64) {
-		d := time.Duration(n)
-		for _, fm := range Formats() {
-			s := fm.Format(d)
-			got, err := fm.Parse(s)
-			if err != nil || got != d {
-				t.Fatalf("%s: Parse(Format(%d)) = %q -> %d, %v", fm, n, s, int64(got), err)
-			}
-		}
-	})
-}
-
-func FuzzParse(f *testing.F) {
-	for _, s := range []string{
-		"1h30m", "5400.5", "PT1H30M0.5S", "1:30:00.5", "1.500s", "-0", "P1D", "PT1.5H",
-		// Texts that more than one format accepts.
-		"0", "+0", "1.5s", ".5s", "1.000000001s", "0.3s", "-0.000000001s",
-	} {
-		f.Add(s)
-	}
-	f.Fuzz(func(t *testing.T, s string) {
-		accepted := map[Format]time.Duration{}
-		for _, fm := range Formats() {
-			d, err := fm.Parse(s) // must not panic
-			if err != nil {
-				continue
-			}
-			accepted[fm] = d
-			// Anything accepted must re-encode to something that parses to the same value.
-			again, err := fm.Parse(fm.Format(d))
-			if err != nil || again != d {
-				t.Fatalf("%s: %q -> %d -> %q -> %d, %v", fm, s, int64(d), fm.Format(d), int64(again), err)
-			}
-		}
-		// AlsoAccept relies on this: formats that may be accepted together
-		// (any two string formats, or a string format and one numeric
-		// format) never read the same text as different durations.
-		for a, da := range accepted {
-			for b, db := range accepted {
-				if a < b && (!a.IsNumeric() || !b.IsNumeric()) && da != db {
-					t.Fatalf("%q is %d in %s but %d in %s", s, int64(da), a, int64(db), b)
-				}
-			}
-		}
-	})
-}
-
-// TestISO8601FractionExact checks fractions of hours and minutes against
-// exact rational arithmetic: the result must be truncated, never rounded,
-// however far away the digit that decides it is.
-func TestISO8601FractionExact(t *testing.T) {
-	tests := []struct {
-		in   string
-		want time.Duration
-	}{
-		{"PT0.0000000000002H", 0},                          // 0.72ns
-		{"PT0.00000000002M", 1},                            // 1.2ns
-		{"PT0.02777777777777777777H", 100*time.Second - 1}, // just below 1/36 h
-		{"PT0.02777777777777777778H", 100 * time.Second},   // just above 1/36 h
-		{"PT0.16666666666666666666M", 10*time.Second - 1},  // just below 1/6 min
-		{"PT0.16666666666666666667M", 10 * time.Second},    // just above 1/6 min
-		{"-PT0.0000000000002H", 0},
-		{"-PT0.00000000002M", -1},
-	}
-	for _, tt := range tests {
-		got, err := ISO8601.Parse(tt.in)
-		if err != nil || got != tt.want {
-			t.Errorf("Parse(%q) = %d, %v; want %d", tt.in, int64(got), err, int64(tt.want))
-		}
-	}
-
-	r := rand.New(rand.NewPCG(1, 2))
-	for range 20000 {
-		digits := make([]byte, 1+r.IntN(25))
-		for i := range digits {
-			digits[i] = byte('0' + r.IntN(10))
-		}
-		for _, u := range []struct {
-			des  string
-			unit time.Duration
-		}{{"H", time.Hour}, {"M", time.Minute}, {"S", time.Second}} {
-			in := "PT0." + string(digits) + u.des
-			exact, _ := new(big.Rat).SetString("0." + string(digits))
-			exact.Mul(exact, new(big.Rat).SetInt64(int64(u.unit)))
-			want := new(big.Int).Quo(exact.Num(), exact.Denom()).Int64()
-			if got, err := ISO8601.Parse(in); err != nil || int64(got) != want {
-				t.Fatalf("Parse(%q) = %d, %v; want %d", in, int64(got), err, want)
-			}
+			t.Errorf("Unmarshal(%s) succeeded, want an error", in)
 		}
 	}
 }
@@ -378,43 +187,76 @@ func TestISO8601FractionExact(t *testing.T) {
 func TestValid(t *testing.T) {
 	for _, f := range Formats() {
 		if !f.Valid() {
-			t.Errorf("%q.Valid() = false", f)
+			t.Errorf("%q.Valid() = false, want true", f)
 		}
 	}
-	for _, f := range []Format{"", "bogus", "ISO8601", "Nano"} {
+
+	invalid := []Format{"", "bogus", "ISO8601", "Iso8601", "iso8601 ", "Nano"}
+	for _, f := range invalid {
 		if f.Valid() {
-			t.Errorf("%q.Valid() = true", f)
-		}
-		if _, err := f.Parse("1"); err == nil {
-			t.Errorf("%q.Parse succeeded, want error", f)
+			t.Errorf("%q.Valid() = true, want false", f)
 		}
 	}
 }
 
-func TestInvalidFormatPanics(t *testing.T) {
-	const bogus = Format("bogus")
-	tests := map[string]struct {
-		fn   func()
-		want string // in the panic message
-	}{
-		"With":                {func() { With(bogus) }, "invalid format"},
-		"Marshalers":          {func() { Marshalers(bogus) }, "invalid format"},
-		"Unmarshalers":        {func() { Unmarshalers(bogus) }, "invalid format"},
-		"Format":              {func() { bogus.Format(time.Second) }, "invalid format"},
-		"Append":              {func() { bogus.Append(nil, time.Second) }, "invalid format"},
-		"AlsoAccept invalid":  {func() { With(ISO8601, AlsoAccept(bogus)) }, "invalid format"},
-		"AlsoAccept numeric":  {func() { With(Nano, AlsoAccept(Sec)) }, "both nano and sec"},
-		"AlsoAccept numerics": {func() { Unmarshalers(ISO8601, AlsoAccept(Milli, Micro)) }, "both milli and micro"},
+func FuzzRoundTrip(f *testing.F) {
+	seeds := []int64{0, 1, -1, int64(d90), math.MaxInt64, math.MinInt64, 1500}
+	for _, n := range seeds {
+		f.Add(n)
 	}
-	for name, tt := range tests {
-		func() {
-			defer func() {
-				msg, _ := recover().(string)
-				if !strings.Contains(msg, tt.want) {
-					t.Errorf("%s: panic %q, want one containing %q", name, msg, tt.want)
+
+	f.Fuzz(func(t *testing.T, n int64) {
+		d := time.Duration(n)
+
+		for _, fm := range Formats() {
+			s := fm.Format(d)
+			if got, err := fm.Parse(s); err != nil || got != d {
+				t.Fatalf("%s.Parse(%s.Format(%d)) = %d, %v", fm, fm, n, int64(got), err)
+			}
+
+			if len(s) > maxPossibleOutputLength {
+				t.Fatalf("%s.Format(%d) = %q, longer than longestOutput = %d", fm, n, s, maxPossibleOutputLength)
+			}
+		}
+	})
+}
+
+// FuzzParse checks that whatever a format reads, it writes back to the same value,
+// and that two formats AlsoAccept can combine never read the same text as different durations.
+func FuzzParse(f *testing.F) {
+	seeds := []string{
+		"1h30m", "5400.5", "PT1H30M0.5S", "1:30:00.5", "1.500s", "-0", "P1D", "PT1.5H",
+		"0", "+0", "1.5s", ".5s", "1.000000001s", "0.3s", "-0.000000001s",
+	}
+
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		accepted := map[Format]time.Duration{}
+
+		for _, fm := range Formats() {
+			d, err := fm.Parse(s)
+			if err != nil {
+				continue
+			}
+
+			accepted[fm] = d
+
+			written := fm.Format(d)
+			if again, err := fm.Parse(written); err != nil || again != d {
+				t.Fatalf("%s: %q reads as %d, writes as %q, reads back as %d, %v",
+					fm, s, int64(d), written, int64(again), err)
+			}
+		}
+
+		for a, da := range accepted {
+			for b, db := range accepted {
+				if a < b && (!a.mustCodec().numeric() || !b.mustCodec().numeric()) && da != db {
+					t.Fatalf("%q is %d in %s but %d in %s", s, int64(da), a, int64(db), b)
 				}
-			}()
-			tt.fn()
-		}()
-	}
+			}
+		}
+	})
 }

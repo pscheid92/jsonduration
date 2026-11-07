@@ -67,8 +67,8 @@ func main() {
 }
 ```
 
-The format applies to fields, pointers, slices, arrays, and map keys and values. Create the options once and share them:
-they are safe for concurrent use.
+The format applies to fields, pointers, slices, arrays, map keys and values, and values in an `any` when marshaling.
+Create the options once and share them: they are safe for concurrent use.
 
 ### One wrapper type per field
 
@@ -108,20 +108,44 @@ Wrapper types embed `time.Duration`, so its methods keep working, as in `cfg.Tim
 
 ## Formats
 
-| Format      | Name        | Wrapper type        | JSON type | 1h30m0.5s       |
-|-------------|-------------|---------------------|-----------|-----------------|
-| `Units`     | `units`     | `UnitsDuration`     | string    | `"1h30m0.5s"`   |
-| `Sec`       | `sec`       | `SecDuration`       | number    | `5400.5`        |
-| `Milli`     | `milli`     | `MilliDuration`     | number    | `5400500`       |
-| `Micro`     | `micro`     | `MicroDuration`     | number    | `5400500000`    |
-| `Nano`      | `nano`      | `NanoDuration`      | number    | `5400500000000` |
-| `ISO8601`   | `iso8601`   | `ISO8601Duration`   | string    | `"PT1H30M0.5S"` |
+| Format      | Name        | Wrapper type        | JSON type | 1h30m0.5s becomes |
+|-------------|-------------|---------------------|-----------|-------------------|
+| `Units`     | `units`     | `UnitsDuration`     | string    | `"1h30m0.5s"`     |
+| `Sec`       | `sec`       | `SecDuration`       | number    | `5400.5`          |
+| `Milli`     | `milli`     | `MilliDuration`     | number    | `5400500`         |
+| `Micro`     | `micro`     | `MicroDuration`     | number    | `5400500000`      |
+| `Nano`      | `nano`      | `NanoDuration`      | number    | `5400500000000`   |
+| `ISO8601`   | `iso8601`   | `ISO8601Duration`   | string    | `"PT1H30M0.5S"`   |
 
 - These are the six formats the `format` tag offered before Go 1.27, and they write the same JSON as they did then.
 - `Nano` writes what `encoding/json` (v1) writes.
-- Numeric formats are not rounded.
+- Numeric formats are exact, with no floating-point rounding.
+- Decoders that read JSON numbers as `float64`, such as JavaScript's `JSON.parse`, can lose the nanoseconds of long
+  durations in every numeric format, in `Nano` beyond about 104 days. So can the `jsontext.CanonicalizeRawInts` and
+  `CanonicalizeRawFloats` options.
+
+As a rule of thumb, use `ISO8601` for APIs that other languages read, `Units` for configuration that people write,
+`Sec` or `Milli` where a number is expected, and `Nano` for data shared with `encoding/json` (v1).
 
 ## Common tasks
+
+### Replacing the `format` tag
+
+Since Go 1.27, `encoding/json/v2` rejects a struct that has a `format` tag option on a `time.Duration` field, so every
+`json.Marshal` and `json.Unmarshal` of it fails. Remove the option, and choose the format in one of the two ways above:
+
+```go
+// Before Go 1.27
+Timeout time.Duration `json:"timeout,format:iso8601"`
+
+// With jsonduration.With(jsonduration.ISO8601) passed to json.Marshal and json.Unmarshal
+Timeout time.Duration `json:"timeout"`
+
+// Or without options
+Timeout jsonduration.ISO8601Duration `json:"timeout"`
+```
+
+Stored data stays readable, since each format writes what the tag option of the same name wrote.
 
 ### Migrating between formats
 
@@ -138,7 +162,7 @@ nanoseconds.
 
 ### ISO 8601 days
 
-`ISO8601` rejects days, weeks, months and years, because a calendar day is not always 24 hours long. If the other side
+`ISO8601` rejects days, weeks, months, and years, because a calendar day is not always 24 hours long. If the other side
 means exactly 24 hours by a day, as Java's `Duration.parse` does, add `AcceptDays`:
 
 ```go
@@ -160,8 +184,13 @@ flag.Parse()
 opts := jsonduration.With(format)
 ```
 
-A `Format` converted from a plain string, as in `jsonduration.Format(os.Getenv("DURATION_FORMAT"))`, is not checked, and
-`With` panics on an invalid one. Check it with `Valid()` first.
+`With` panics on an invalid `Format`. A `Format` converted from a plain string, as in
+`jsonduration.Format(os.Getenv("DURATION_FORMAT"))`, is not checked, so check it with `Valid()` first. The empty
+`Format` is invalid too, and decoding leaves it for a missing name or `null`, so give it a default:
+
+```go
+opts := jsonduration.With(cmp.Or(cfg.DurationFormat, jsonduration.ISO8601))
+```
 
 ### Without JSON
 
@@ -173,17 +202,23 @@ d, err := jsonduration.Sec.Parse("5400.5")    // 1h30m0.5s
 ## Good to know
 
 - Decoding accepts only the formats you configured.
-- Named types such as `type TTL time.Duration` are not `time.Duration`, so `With` does not affect them.
+- To tell a bad duration in the input from other errors, as for a 400 Bad Request, check
+  `errors.Is(err, jsonduration.ErrInvalidDuration)`. The `json.SemanticError` around it says where in the input it is.
+- JSON `null` sets a duration to zero, and a `*time.Duration` to nil.
+- Named types such as `type TTL time.Duration` are not `time.Duration`, so `With` does not affect them, and they are
+  written as plain integers of nanoseconds.
+- `ISO8601` takes a sign only in front, as in `-PT1H30M`, so it rejects negative durations as Java writes them, such as
+  `PT-1H-30M`.
 - To leave out zero durations, use the `omitzero` tag option. In v2, `omitempty` keeps them.
 - If you pass your own `json.WithMarshalers`, combine it with `jsonduration.Marshalers` through `json.JoinMarshalers`,
   and likewise for unmarshalers. A second `WithMarshalers` option replaces the first one.
-- If nanoseconds are all you need, the `FormatDurationAsNano(true)` option from `encoding/json`, passed to the v2
-  functions, is enough.
+- If nanoseconds are all you need, an option of `encoding/json` is enough: import it as `jsonv1 "encoding/json"` and
+  pass `jsonv1.FormatDurationAsNano(true)` to the v2 functions.
 
 ## Future
 
-Go may add its own way to choose a format for a type, see [golang/go#71664](https://go.dev/issue/71664)
-and [golang/go#81013](https://go.dev/issue/81013). If that happens, prefer it. A final release of this package will then
+Go may add its own way to choose a format for a type, see [golang/go#71664](https://go.dev/issue/71664) and
+[golang/go#81013](https://go.dev/issue/81013). If that happens, prefer it. A final release of this package will then
 point to it.
 
 ## Development
@@ -191,7 +226,7 @@ point to it.
 Needs [just](https://just.systems) and [golangci-lint](https://golangci-lint.run). Run `just` to list all recipes.
 
 ```sh
-just check      # lint, tests with -race, govulncheck
+just check      # go fix, gofmt, go mod tidy, vet, lint, tests with -race, govulncheck
 just fuzz       # every fuzz target for 30s
 ```
 

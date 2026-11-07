@@ -1,20 +1,63 @@
-// Copyright 2026 Patrick Scheid. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package jsonduration
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"io"
 	"testing"
 	"time"
 )
 
+// formatted keeps results of Format alive, as a caller would, so that they cannot stay on the stack.
+var formatted string
+
+func TestAllocations(t *testing.T) {
+	for _, f := range Formats() {
+		t.Run(string(f), func(t *testing.T) {
+			opts := With(f)
+			text := f.Format(d90)
+			enc := jsontext.NewEncoder(io.Discard, opts)
+
+			in, err := json.Marshal(d90, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var d time.Duration
+			tests := []struct {
+				name string
+				want float64
+				fn   func() error
+			}{
+				// Format and Parse allocate once more than needed: their buffer escapes through the codec interface.
+				{"Format", 2, func() error { formatted = f.Format(d90); return nil }},
+				{"Parse", 1, func() error { _, err := f.Parse(text); return err }},
+				{"encode", 0, func() error { return encode(enc, f.mustCodec(), d90) }},
+				{"Unmarshal", 0, func() error { return json.Unmarshal(in, &d, opts) }},
+			}
+
+			for _, tt := range tests {
+				var err error
+				allocs := testing.AllocsPerRun(100, func() { err = tt.fn() })
+				if err != nil {
+					t.Fatalf("%s: %v", tt.name, err)
+				}
+
+				if allocs != tt.want {
+					t.Errorf("%s allocs = %v, want %v", tt.name, allocs, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkMarshal(b *testing.B) {
+	v := object{D: d90}
+
 	for _, f := range Formats() {
 		b.Run(string(f), func(b *testing.B) {
 			opts := With(f)
-			v := struct{ D time.Duration }{d90}
+
 			b.ReportAllocs()
 			for b.Loop() {
 				if _, err := json.Marshal(v, opts); err != nil {
@@ -25,29 +68,13 @@ func BenchmarkMarshal(b *testing.B) {
 	}
 }
 
-func BenchmarkUnmarshal(b *testing.B) {
-	for _, f := range Formats() {
-		in, err := json.Marshal(struct{ D time.Duration }{d90}, With(f))
-		if err != nil {
-			b.Fatal(err)
-		}
-		b.Run(string(f), func(b *testing.B) {
-			opts := With(f)
-			var v struct{ D time.Duration }
-			b.ReportAllocs()
-			for b.Loop() {
-				if err := json.Unmarshal(in, &v, opts); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
+func BenchmarkMarshalInt64Baseline(b *testing.B) {
+	type baseline struct {
+		D int64
 	}
-}
 
-// BenchmarkMarshalInt64 is the baseline: the same struct with a plain
-// int64, which v2 encodes without any caller-specified marshaler.
-func BenchmarkMarshalInt64(b *testing.B) {
-	v := struct{ D int64 }{int64(d90)}
+	v := baseline{D: int64(d90)}
+
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := json.Marshal(v); err != nil {
@@ -56,9 +83,61 @@ func BenchmarkMarshalInt64(b *testing.B) {
 	}
 }
 
+func BenchmarkUnmarshal(b *testing.B) {
+	v := object{D: d90}
+
+	for _, f := range Formats() {
+		opts := With(f)
+
+		in, err := json.Marshal(v, opts)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.Run(string(f), func(b *testing.B) {
+			var got object
+
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := json.Unmarshal(in, &got, opts); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkUnmarshalInt64Baseline(b *testing.B) {
+	type baseline struct {
+		D int64
+	}
+
+	in := []byte(`{"D":5400500000000}`)
+	var got baseline
+
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := json.Unmarshal(in, &got); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFormat(b *testing.B) {
+	for _, f := range Formats() {
+		b.Run(string(f), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				formatted = f.Format(d90)
+			}
+		})
+	}
+}
+
 func BenchmarkParse(b *testing.B) {
 	for _, f := range Formats() {
 		s := f.Format(d90)
+
 		b.Run(string(f), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {

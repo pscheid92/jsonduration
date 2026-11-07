@@ -29,10 +29,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 -------------------------------------------------------------------------------
 
-Parts of format.go are adapted from encoding/json/v2 in the Go standard
-library. That code is covered by the following notice:
+Parts of decimal.go, iso8601.go and digits.go are adapted from
+encoding/json/v2 in the Go standard library. That code is covered by the
+following notice:
 
-Copyright 2009 The Go Authors.
+Copyright 2020 The Go Authors.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are

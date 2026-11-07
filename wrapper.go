@@ -1,7 +1,3 @@
-// Copyright 2026 Patrick Scheid. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package jsonduration
 
 import (
@@ -9,105 +5,90 @@ import (
 	"time"
 )
 
-// The wrapper types below differ only in their format. TestWrapperTypes
-// checks each against With for its format, so a mix-up between them fails.
-
-// decoders holds a single-format decoder for each format, for the
-// UnmarshalJSONFrom methods of the wrapper types.
-var decoders = func() map[Format]*decoder {
-	m := make(map[Format]*decoder)
-	for _, f := range Formats() {
-		m[f] = newDecoder(f, nil)
-	}
-	return m
-}()
-
-// UnitsDuration is a [time.Duration] that encodes itself in format [Units]
-// in encoding/json/v2, without any options: as a JSON string such as
-// "1h30m0.5s" for 1h30m0.5s.
+// UnitsDuration holds a [time.Duration] and encodes it in format [Units], such as "1h30m0.5s", without options.
 type UnitsDuration struct{ time.Duration }
 
 // MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
 func (d UnitsDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return encode(enc, Units, d.Duration)
+	return encode(enc, codecUnits, d.Duration)
 }
 
 // UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
 func (d *UnitsDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	return decoders[Units].decode(dec, &d.Duration)
+	return decoderUnits.decode(dec, &d.Duration)
 }
 
-// SecDuration is a [time.Duration] that encodes itself in format [Sec]
-// in encoding/json/v2, without any options: as a JSON number such as
-// 5400.5 for 1h30m0.5s.
+// SecDuration holds a [time.Duration] and encodes it in format [Sec], such as 5400.5, without options.
 type SecDuration struct{ time.Duration }
 
 // MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
 func (d SecDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return encode(enc, Sec, d.Duration)
+	return encode(enc, codecSec, d.Duration)
 }
 
 // UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
 func (d *SecDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	return decoders[Sec].decode(dec, &d.Duration)
+	return decoderSec.decode(dec, &d.Duration)
 }
 
-// MilliDuration is a [time.Duration] that encodes itself in format [Milli]
-// in encoding/json/v2, without any options: as a JSON number such as
-// 5400500 for 1h30m0.5s.
+// MilliDuration holds a [time.Duration] and encodes it in format [Milli], such as 5400500, without options.
 type MilliDuration struct{ time.Duration }
 
 // MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
 func (d MilliDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return encode(enc, Milli, d.Duration)
+	return encode(enc, codecMilli, d.Duration)
 }
 
 // UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
 func (d *MilliDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	return decoders[Milli].decode(dec, &d.Duration)
+	return decoderMilli.decode(dec, &d.Duration)
 }
 
-// MicroDuration is a [time.Duration] that encodes itself in format [Micro]
-// in encoding/json/v2, without any options: as a JSON number such as
-// 5400500000 for 1h30m0.5s.
+// MicroDuration holds a [time.Duration] and encodes it in format [Micro], such as 5400500000, without options.
 type MicroDuration struct{ time.Duration }
 
 // MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
 func (d MicroDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return encode(enc, Micro, d.Duration)
+	return encode(enc, codecMicro, d.Duration)
 }
 
 // UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
 func (d *MicroDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	return decoders[Micro].decode(dec, &d.Duration)
+	return decoderMicro.decode(dec, &d.Duration)
 }
 
-// NanoDuration is a [time.Duration] that encodes itself in format [Nano]
-// in encoding/json/v2, without any options: as a JSON number such as
-// 5400500000000 for 1h30m0.5s.
+// NanoDuration holds a [time.Duration] and encodes it in format [Nano], such as 5400500000000, without options.
 type NanoDuration struct{ time.Duration }
 
 // MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
 func (d NanoDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return encode(enc, Nano, d.Duration)
+	return encode(enc, codecNano, d.Duration)
 }
 
 // UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
 func (d *NanoDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	return decoders[Nano].decode(dec, &d.Duration)
+	return decoderNano.decode(dec, &d.Duration)
 }
 
-// ISO8601Duration is a [time.Duration] that encodes itself in format [ISO8601]
-// in encoding/json/v2, without any options: as a JSON string such as
-// "PT1H30M0.5S" for 1h30m0.5s.
+// ISO8601Duration holds a [time.Duration] and encodes it in format [ISO8601], such as "PT1H30M0.5S", without options.
 type ISO8601Duration struct{ time.Duration }
 
 // MarshalJSONTo implements [encoding/json/v2.MarshalerTo].
 func (d ISO8601Duration) MarshalJSONTo(enc *jsontext.Encoder) error {
-	return encode(enc, ISO8601, d.Duration)
+	return encode(enc, codecISO8601, d.Duration)
 }
 
 // UnmarshalJSONFrom implements [encoding/json/v2.UnmarshalerFrom].
 func (d *ISO8601Duration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
-	return decoders[ISO8601].decode(dec, &d.Duration)
+	return decoderISO8601.decode(dec, &d.Duration)
 }
+
+// The decoders of the wrapper types, one per format.
+var (
+	decoderUnits   = newDecoder(Units, nil)
+	decoderSec     = newDecoder(Sec, nil)
+	decoderMilli   = newDecoder(Milli, nil)
+	decoderMicro   = newDecoder(Micro, nil)
+	decoderNano    = newDecoder(Nano, nil)
+	decoderISO8601 = newDecoder(ISO8601, nil)
+)
