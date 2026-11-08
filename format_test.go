@@ -64,10 +64,12 @@ func TestFormat(t *testing.T) {
 	}
 }
 
-// TestLongestOutput computes the longest output from the extremes, where every format writes the most digits,
+// TestLongestOutput computes the longest output from the durations where every format writes the most digits,
 // and requires maxPossibleOutputLength to match it exactly. FuzzRoundTrip checks that no other duration writes more.
 func TestLongestOutput(t *testing.T) {
-	extremes := []time.Duration{maxD, minD}
+	// Below the extremes, every field of Units and ISO8601 can still be at its widest at once.
+	widestFields := 2562046*time.Hour + 59*time.Minute + 59*time.Second + 999999999
+	extremes := []time.Duration{maxD, minD, widestFields, -widestFields}
 
 	longest := 0
 	for _, f := range Formats() {
@@ -77,7 +79,7 @@ func TestLongestOutput(t *testing.T) {
 	}
 
 	if longest != maxPossibleOutputLength {
-		t.Errorf("the longest output has %d bytes, but longestOutput = %d", longest, maxPossibleOutputLength)
+		t.Errorf("the longest output has %d bytes, but maxPossibleOutputLength = %d", longest, maxPossibleOutputLength)
 	}
 }
 
@@ -215,7 +217,7 @@ func FuzzRoundTrip(f *testing.F) {
 			}
 
 			if len(s) > maxPossibleOutputLength {
-				t.Fatalf("%s.Format(%d) = %q, longer than longestOutput = %d", fm, n, s, maxPossibleOutputLength)
+				t.Fatalf("%s.Format(%d) = %q, longer than maxPossibleOutputLength = %d", fm, n, s, maxPossibleOutputLength)
 			}
 		}
 	})
