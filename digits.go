@@ -132,7 +132,9 @@ func parseDigits(digits []byte) uint64 {
 //	5:  5 × 3600s / 10          = 1800s
 //	2: (2 × 3600s + 1800s) / 10 =  900s
 //
-// 10 × unit must fit in a uint64.
+// n stays below unit, so digit × unit + n stays below 10 × unit, which must fit in a uint64.
+// Rounding down at every step gives the same result as rounding down once at the end,
+// since ⌊(a + ⌊x⌋) / 10⌋ = ⌊(a + x) / 10⌋ for every whole number a.
 func fracOfUnit(frac []byte, unit uint64) uint64 {
 	var n uint64
 

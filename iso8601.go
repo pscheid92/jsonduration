@@ -99,11 +99,26 @@ func (iso iso8601Codec) parse(b []byte) (time.Duration, error) {
 }
 
 // An isoComponent is a number followed by its designator, in either case, such as "30M" for 30 minutes.
-// Years and months are always rejected, so their units only need to differ from those of days and weeks.
 type isoComponent struct {
 	upper, lower byte
+	kind         isoKind
 	unit         uint64
 }
+
+// An isoKind says whether a component has a fixed length.
+type isoKind int
+
+const (
+	// clockUnit is an hour, a minute, or a second, which always have a fixed length and may take a fraction.
+	clockUnit isoKind = iota
+
+	// dayUnit is a day or a week. With acceptDays it has a fixed length, but takes no fraction.
+	// Without acceptDays it is a calendar unit.
+	dayUnit
+
+	// calendarUnit is a year or a month, which have no fixed length. Its unit is unused.
+	calendarUnit
+)
 
 const (
 	day  = 24 * time.Hour
@@ -112,16 +127,16 @@ const (
 
 var (
 	isoDate = []isoComponent{
-		{'Y', 'y', uint64(365 * day)},
-		{'M', 'm', uint64(30 * day)},
-		{'W', 'w', uint64(week)},
-		{'D', 'd', uint64(day)},
+		{'Y', 'y', calendarUnit, 0},
+		{'M', 'm', calendarUnit, 0},
+		{'W', 'w', dayUnit, uint64(week)},
+		{'D', 'd', dayUnit, uint64(day)},
 	}
 
 	isoClock = []isoComponent{
-		{'H', 'h', uint64(time.Hour)},
-		{'M', 'm', uint64(time.Minute)},
-		{'S', 's', uint64(time.Second)},
+		{'H', 'h', clockUnit, uint64(time.Hour)},
+		{'M', 'm', clockUnit, uint64(time.Minute)},
+		{'S', 's', clockUnit, uint64(time.Second)},
 	}
 )
 
@@ -135,31 +150,37 @@ type isoSum struct {
 	hadFraction   bool
 }
 
-// take reads one component, such as "30M", from the start of s, adds it to the sum and returns the rest of s.
-// parse calls it once per designator, in order, so a missing component is skipped:
-// take returns s unchanged, also after a component with a fraction, which must be the last.
+// take reads the component c, such as "30M", from the start of s, adds it to the sum and returns the rest of s.
+// parse calls it once per component, in order. If s does not contain the designator of c, take returns s unchanged.
 // It reports false for a malformed component.
 func (sum *isoSum) take(s []byte, c isoComponent) ([]byte, bool) {
 	number, rest, found := cutEither(s, c.upper, c.lower)
-	if !found || sum.hadFraction {
+	if !found {
 		return s, true
 	}
 
+	// Only the last component may have a fraction.
+	if sum.hadFraction {
+		return nil, false
+	}
+
+	// This also rejects components out of order: in "1M1H", the text before the H is "1M1", which is not a number.
 	whole, fraction, hasFraction := cutEither(number, '.', ',')
 	if !isDigits(whole) || hasFraction && !isDigits(fraction) {
 		return nil, false
 	}
 
-	// Days and weeks with acceptDays take no fraction.
-	// Without acceptDays they count as calendar units, like years and months, with or without one.
-	fixed := c.unit <= uint64(time.Hour) || sum.acceptDays && (c.unit == uint64(day) || c.unit == uint64(week))
-	if hasFraction && fixed && c.unit > uint64(time.Hour) {
+	sum.hadFraction = hasFraction
+
+	isCalendar := c.kind == calendarUnit || c.kind == dayUnit && !sum.acceptDays
+	switch {
+	case isCalendar:
+		sum.calendarUnits = true
+	case c.kind == dayUnit && hasFraction:
 		return nil, false
+	default:
+		sum.total = add(sum.total, scale(whole, fraction, c.unit))
 	}
 
-	sum.hadFraction = hasFraction
-	sum.calendarUnits = sum.calendarUnits || !fixed
-
-	sum.total = add(sum.total, scale(whole, fraction, c.unit))
 	return rest, true
 }

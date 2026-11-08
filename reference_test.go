@@ -116,7 +116,8 @@ func referenceISO8601(s string, acceptDays bool) (time.Duration, error) {
 
 	const day = 24 * 3600e9
 	components := make([]component, 0, 7)
-	for i, unit := range []int64{365 * day, 30 * day, 7 * day, day, 3600e9, 60e9, 1e9} {
+	// Years and months are always calendar units, so their units are unused.
+	for i, unit := range []int64{0, 0, 7 * day, day, 3600e9, 60e9, 1e9} {
 		whole, present := group(2 + 2*i)
 		if i >= 4 {
 			whole, present = group(3 + 2*i)
@@ -156,7 +157,8 @@ func referenceISO8601(s string, acceptDays bool) (time.Duration, error) {
 			return 0, strconv.ErrSyntax
 		}
 
-		if c.hasFraction && !c.calendar && c.unit > 3600e9 {
+		// Days and weeks read with acceptDays take no fraction.
+		if c.hasFraction && !c.calendar && i <= 3 {
 			return 0, strconv.ErrSyntax
 		}
 
