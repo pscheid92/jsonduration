@@ -108,7 +108,7 @@ func ExampleAcceptDays() {
 
 // Tell a bad duration in a request from other errors, for example to answer with 400 Bad Request,
 // and find where in the request it is.
-func ExampleErrInvalidDuration() {
+func Example_invalidDuration() {
 	type Request struct {
 		Timeout time.Duration `json:"timeout"`
 	}
@@ -133,7 +133,9 @@ func ExampleErrInvalidDuration() {
 	// invalid duration "90s" in format iso8601: invalid syntax
 }
 
-func ExampleErrWrongType() {
+// Tell a JSON value of the wrong type, such as a number where the format writes a string, from a string that is
+// not a duration. Such an error matches ErrInvalidDuration as well.
+func Example_wrongType() {
 	opts := jsonduration.With(jsonduration.ISO8601)
 
 	var d time.Duration
