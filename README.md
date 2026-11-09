@@ -145,7 +145,16 @@ Timeout time.Duration `json:"timeout"`
 Timeout jsonduration.ISO8601Duration `json:"timeout"`
 ```
 
-Stored data stays readable, since each format writes what the tag option of the same name wrote.
+Stored data stays readable, since each format writes what the tag option of the same name wrote. A test checks this
+against the tag option itself, whose code the standard library still contains and which go-json-experiment's
+`ExperimentalSupportFormatTag` turns back on. Decoding differs only where jsonduration is stricter or exact:
+
+- It reads `-0` as zero, where the tag option reports it as out of range.
+- It rejects a fraction that is not all digits, such as `"PT1.e5H"`, which the tag option reads as one hour.
+- It truncates fractions of hours and minutes exactly, where the tag option rounds them through `float64`, so the
+  last nanosecond can differ, as for `"PT0.99999999999999999999H"`.
+- The `string` tag option has no effect on `Units` and `ISO8601`, where the tag option rejects it.
+- Its errors name their cause, such as `strconv.ErrSyntax` or `ErrCalendarUnits`.
 
 ### Migrating between formats
 
