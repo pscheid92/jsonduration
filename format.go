@@ -32,9 +32,10 @@ const (
 	Nano Format = "nano"
 
 	// ISO8601 writes a JSON string in ISO 8601, such as "PT1H30M0.5S", in hours, minutes, and seconds.
-	// It also reads forms such as "PT90M" and "PT1.5H", but rejects years, months, weeks, and days,
-	// whose length varies; see [AcceptDays].
-	// Only a sign in front is allowed, as in "-PT1H30M", so Java's "PT-1H-30M" is rejected.
+	// It also reads forms such as "PT90M" and "PT1.5H", designators in either case, and a decimal comma, as in
+	// "pt1,5s". It rejects years, months, weeks, and days, whose length varies, unless their count is zero;
+	// see [AcceptDays].
+	// Only a sign in front is allowed, as in "-PT30S", so Java's negative durations such as "PT-30S" are rejected.
 	ISO8601 Format = "iso8601"
 )
 

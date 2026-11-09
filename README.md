@@ -20,32 +20,57 @@ Until v1.0.0 the API may still change.
 
 ## Usage
 
-Pass one option per call. It covers every `time.Duration` in the call: fields, pointers, slices, arrays, and map keys
-and values. The options are safe for concurrent use, so create them once.
+Without this package, `json.Marshal` of a `time.Duration` fails with `no default representation`. Create one option
+with `With` and pass it to each `json.Marshal` and `json.Unmarshal`. It applies one format to every `time.Duration` in
+that call: in fields, pointers, slices, arrays, and map keys and values.
 
 ```go
+package main
+
+import (
+	"encoding/json/v2"
+	"fmt"
+	"time"
+
+	"github.com/pscheid92/jsonduration"
+)
+
 type Config struct {
 	Timeout time.Duration   `json:"timeout"`
 	Retries []time.Duration `json:"retries"`
 }
 
-opts := jsonduration.With(jsonduration.ISO8601)
+// Options are safe for concurrent use, so create them once.
+var opts = jsonduration.With(jsonduration.ISO8601)
 
-b, err := json.Marshal(cfg, opts) // {"timeout":"PT1M30S","retries":["PT1S","PT5S"]}
-err = json.Unmarshal(b, &cfg, opts)
+func main() {
+	cfg := Config{Timeout: 90 * time.Second, Retries: []time.Duration{time.Second, 5 * time.Second}}
+
+	b, err := json.Marshal(cfg, opts)
+	fmt.Println(string(b), err) // {"timeout":"PT1M30S","retries":["PT1S","PT5S"]} <nil>
+
+	err = json.Unmarshal([]byte(`{"timeout":"PT2M"}`), &cfg, opts)
+	fmt.Println(cfg.Timeout, err) // 2m0s <nil>
+}
 ```
 
-Or use one wrapper type per field, if you can't pass options or if fields need different formats:
+`encoding/json/v2` is part of the standard library since Go 1.27, with no `GOEXPERIMENT` setting.
+
+If you can't pass options, for example because other code encodes your types, or if fields need different formats,
+give each field a wrapper type. The wrapper types are listed in the table below:
 
 ```go
 type Config struct {
 	Timeout jsonduration.ISO8601Duration `json:"timeout"` // "PT1M30S"
 	Backoff jsonduration.SecDuration     `json:"backoff"` // 1.5
 }
+
+cfg := Config{Timeout: jsonduration.ISO8601Duration{Duration: 90 * time.Second}}
 ```
 
-A wrapper type embeds `time.Duration`, so `cfg.Timeout.Minutes()` keeps working. The
-[package documentation](https://pkg.go.dev/github.com/pscheid92/jsonduration) has runnable examples of both.
+A wrapper type embeds `time.Duration`, so `cfg.Timeout.Minutes()` keeps working, but where a `time.Duration` is
+expected you write `cfg.Timeout.Duration`. To keep plain `time.Duration` fields in a struct that others encode, see
+[Your own types](#your-own-types).
 
 ## Formats
 
@@ -61,8 +86,8 @@ A wrapper type embeds `time.Duration`, so `cfg.Timeout.Minutes()` keeps working.
 Use `ISO8601` for APIs that other languages read, `Units` for configuration that people write, `Sec` or `Milli` where
 a number is expected, and `Nano` for data shared with `encoding/json` (v1), which writes the same.
 
-Numeric formats are exact. But a decoder that reads JSON numbers as `float64`, such as JavaScript's `JSON.parse`, can
-lose the nanoseconds of long durations.
+Numeric formats are exact and write fractions where needed, so `Milli` writes 1.5ms as `1.5`. A decoder that reads
+JSON numbers as `float64`, such as JavaScript's `JSON.parse`, can lose the nanoseconds of long durations.
 
 ## Common tasks
 
@@ -102,6 +127,9 @@ opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AlsoAccept(jsondura
 Both `90000000000` and `"PT1M30S"` decode to 1m30s, and everything is written as ISO 8601. You can accept several
 string formats, but only one numeric format, because `90` could be seconds or nanoseconds.
 
+When several services share the data, let every reader accept the new format before any writer switches to it. A
+service still on `encoding/json` (v1) cannot read ISO 8601 at all.
+
 ### ISO 8601 days
 
 `ISO8601` rejects days, weeks, months, and years, because a calendar day is not always 24 hours long. If the other side
@@ -112,12 +140,14 @@ opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AcceptDays())
 // "P1DT12H" decodes to 36h
 ```
 
-Months and years stay rejected, and output never uses days. A count of zero, as in `"P0D"` or `"P0Y0M0DT1H30M0S"`, is
+Without `AcceptDays`, `"P1D"` fails with `calendar units have no fixed length`. Months and years stay rejected, and
+output never uses days. A count of zero, as in `"P0D"` or `"P0Y0M0DT1H30M0S"`, is
 always read.
 
-### Options for a wrapper type
+### Your own types
 
-The wrapper types take no options. If a field needs `AcceptDays` or `AlsoAccept`, write your own:
+The wrapper types take no options, so `ISO8601Duration` rejects `"P1DT12H"`. If a field needs `AcceptDays` or
+`AlsoAccept`, write your own wrapper type with the imports `encoding/json/v2` and `encoding/json/jsontext`:
 
 ```go
 var daysOptions = jsonduration.With(jsonduration.ISO8601, jsonduration.AcceptDays())
@@ -133,9 +163,30 @@ func (d *DaysDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 }
 ```
 
+The same two methods give a named type such as `type TTL time.Duration` a format, since `With` does not reach it:
+
+```go
+var unitsOptions = jsonduration.With(jsonduration.Units)
+
+type TTL time.Duration
+
+func (t TTL) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return json.MarshalEncode(enc, time.Duration(t), unitsOptions)
+}
+
+func (t *TTL) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return json.UnmarshalDecode(dec, (*time.Duration)(t), unitsOptions)
+}
+```
+
+A struct that others encode without options can keep plain `time.Duration` fields with the same two methods on the
+struct itself, as [an example](https://pkg.go.dev/github.com/pscheid92/jsonduration#example-With-StructWithoutOptions)
+shows.
+
 ### Choosing the format at run time
 
-`Format` works with `flag.TextVar` and in JSON configuration. Names must match the table exactly:
+`Format` works with `flag.TextVar` and in JSON configuration. Names must match the table exactly, in lower case, so
+`ISO8601` is not a name:
 
 ```go
 var format jsonduration.Format
@@ -144,8 +195,14 @@ flag.Parse()
 opts := jsonduration.With(format)
 ```
 
-`With` panics on an invalid `Format`, which includes the empty one. Check a `Format` converted from a plain string
-with `Valid()` first.
+`With` panics on an invalid `Format`, which includes the empty one. Check a `Format` from a plain string first:
+
+```go
+format := jsonduration.Format(os.Getenv("DURATION_FORMAT"))
+if !format.Valid() {
+	log.Fatalf("DURATION_FORMAT=%q, want one of %v", format, jsonduration.Formats())
+}
+```
 
 ### Without JSON
 
@@ -157,13 +214,15 @@ d, err := jsonduration.Sec.Parse("5400.5")    // 1h30m0.5s
 ## Good to know
 
 - Every error about a bad duration matches `jsonduration.ErrInvalidDuration`, and its cause: `strconv.ErrSyntax`,
-  `strconv.ErrRange`, `ErrCalendarUnits`, or `ErrWrongType`. The `json.SemanticError` around it says where it is.
-- Named types such as `type TTL time.Duration` are not `time.Duration`, so `With` does not affect them.
+  `strconv.ErrRange`, `ErrCalendarUnits`, or `ErrWrongType`. The `json.SemanticError` around it says where it is,
+  in its `JSONPointer`. Malformed JSON is a `jsontext.SyntacticError` instead.
 - JSON `null` sets a duration to zero, and a `*time.Duration` to nil.
 - To leave out zero durations, use `omitzero`. In v2, `omitempty` keeps them.
-- If you pass your own `json.WithMarshalers`, combine it with `jsonduration.Marshalers` through
-  `json.JoinMarshalers`, and likewise for unmarshalers. A second `WithMarshalers` option replaces the first one.
-- `ISO8601` takes a sign only in front, as in `-PT1H30M`. It rejects `PT-1H-30M`, as Java writes it.
+- If you pass your own `json.WithMarshalers`, join them, since a second `WithMarshalers` option replaces the first:
+  `json.WithMarshalers(json.JoinMarshalers(yours, jsonduration.Marshalers(jsonduration.Units)))`, and likewise with
+  `Unmarshalers`.
+- `ISO8601` takes a sign only in front, as in `-PT30S`. It rejects Java's negative durations, such as `PT-30S`.
+- `ISO8601` reads designators in either case and a decimal comma, so `pt1,5s` is 1.5s.
 - If nanoseconds are all you need, `encoding/json` has an option for the v2 functions:
   `jsonv1.FormatDurationAsNano(true)`.
 

@@ -63,10 +63,9 @@
 //
 //	invalid duration "90s" in format iso8601: invalid syntax
 //
-// The cause is [strconv.ErrSyntax], [strconv.ErrRange], or [ErrCalendarUnits], which the error wraps.
+// The cause is [strconv.ErrSyntax], [strconv.ErrRange], [ErrCalendarUnits], or, for a JSON value of the wrong type
+// such as a number for ISO8601, [ErrWrongType], which reads "want a JSON string". The error wraps it.
 // With formats from [AlsoAccept], it is a syntax error only if every format rejects the syntax.
-// A JSON value of the wrong type, such as a number for ISO8601, has a cause of its own, which matches [ErrWrongType]
-// and reads "want a JSON string".
 // JSON decoding returns the error inside a json.SemanticError, as encoding/json/v2 does for other types.
 // Its JSONPointer tells where in the input the duration is.
 // A format name that [Format.UnmarshalText] does not know is an error that lists the valid names.
@@ -79,7 +78,8 @@
 // # Good to know
 //
 // Named types such as `type TTL time.Duration` are distinct types, so [With] does not affect them,
-// and encoding/json/v2 writes them as plain integers of nanoseconds.
+// and encoding/json/v2 writes them as plain integers of nanoseconds. Two short methods give them a format, as the
+// example of [With] for a named type shows.
 // To omit zero durations, use the `omitzero` tag option, since `omitempty` only omits values that encode as empty JSON.
 // The `string` tag option quotes numeric formats, like json.StringifyNumbers, and has no effect on string formats.
 // An explicit json.StringifyNumbers(false) turns it off for durations, unlike for other numbers,
