@@ -13,8 +13,9 @@ on:
 permissions:
   contents: read
 
+# The event is part of the group, so that a merge and the weekly run do not cancel each other.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

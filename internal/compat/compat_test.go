@@ -1,6 +1,7 @@
 package compat
 
 import (
+	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -32,7 +33,7 @@ type target struct {
 // The tag option rejects ,string on a string format, where jsonduration ignores it, as TestStringOptionOnStringFormats
 // shows, so there the target compares with the tag option without ,string.
 func targets() []target {
-	var all []target
+	all := make([]target, 0, 2*len(jsonduration.Formats()))
 	for _, f := range jsonduration.Formats() {
 		for _, stringOption := range []string{"", ",string"} {
 			tagStringOption := stringOption
@@ -123,7 +124,7 @@ func checkMarshal(t *testing.T, tg target, d time.Duration) {
 
 	want, wantErr := tg.marshalTagged(d)
 	got, err := tg.marshalPlain(d)
-	if err != nil || wantErr != nil || string(got) != string(want) {
+	if err != nil || wantErr != nil || !bytes.Equal(got, want) {
 		t.Fatalf("%s: Marshal(%d) = %s, %v; the tag option writes %s, %v", tg.name, d, got, err, want, wantErr)
 	}
 }
@@ -164,7 +165,7 @@ func FuzzUnmarshalMatchesFormatTag(f *testing.F) {
 
 var (
 	// A negative number that truncates to zero, such as -0 or -0.0000000001, possibly quoted.
-	negativeZero = regexp.MustCompile(`^"?-0(\.0*[0-9]*)?"?$`)
+	negativeZero = regexp.MustCompile(`^"?-0(\.0*\d*)?"?$`)
 
 	// A fraction that starts with e or E, as in "PT1.e5H".
 	fractionStartingWithE = regexp.MustCompile(`[.,][eE]`)
@@ -173,7 +174,7 @@ var (
 	onlyZeroCalendarUnits = regexp.MustCompile(`(?i)^"[+-]?P(0+[YMWD])+(T.*)?"$`)
 
 	// A fraction of hours or minutes as the last component, as in "PT1.5H".
-	fractionOfHoursOrMinutes = regexp.MustCompile(`[.,][0-9]+[HhMm]"$`)
+	fractionOfHoursOrMinutes = regexp.MustCompile(`[.,]\d+[HhMm]"$`)
 )
 
 // intendedDifference reports whether jsonduration differs from the tag option on value in one of the ways that
