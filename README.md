@@ -55,7 +55,18 @@ func main() {
 }
 ```
 
-`encoding/json/v2` is part of the standard library since Go 1.27, with no `GOEXPERIMENT` setting.
+`encoding/json/v2` is part of the standard library since Go 1.27, with no `GOEXPERIMENT` setting. Creating the
+options costs about a dozen allocations, so create them once rather than per call.
+
+If you already pass `json.WithMarshalers` or `json.WithUnmarshalers`, don't add `With` next to them: a second
+`WithMarshalers` option replaces the first, without an error. Join yours with the package's instead:
+
+```go
+opts := json.JoinOptions(
+	json.WithMarshalers(json.JoinMarshalers(yours, jsonduration.Marshalers(jsonduration.Units))),
+	json.WithUnmarshalers(json.JoinUnmarshalers(yoursToo, jsonduration.Unmarshalers(jsonduration.Units))),
+)
+```
 
 If you can't pass options, for example because other code encodes your types, or if fields need different formats,
 give each field a wrapper type. The wrapper types are listed in the table below:
@@ -181,8 +192,9 @@ func (t *TTL) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 ```
 
 A struct that others encode without options can keep plain `time.Duration` fields with the same two methods on the
-struct itself, as [an example](https://pkg.go.dev/github.com/pscheid92/jsonduration#example-With-StructWithoutOptions)
-shows.
+struct itself, as [`RetryPolicy` in the examples](example_own_types_test.go) shows. Others must then use it as a named
+field, `Retry RetryPolicy`, and not embed it: an embedded struct passes its methods on, and the outer struct then
+encodes as the inner one alone, without its other fields.
 
 ### Choosing the format at run time
 
@@ -219,11 +231,19 @@ d, err := jsonduration.Sec.Parse("5400.5")    // 1h30m0.5s
   in its `JSONPointer`. Malformed JSON is a `jsontext.SyntacticError` instead.
 - JSON `null` sets a duration to zero, and a `*time.Duration` to nil.
 - To leave out zero durations, use `omitzero`. In v2, `omitempty` keeps them.
-- If you pass your own `json.WithMarshalers`, join them, since a second `WithMarshalers` option replaces the first:
-  `json.WithMarshalers(json.JoinMarshalers(yours, jsonduration.Marshalers(jsonduration.Units)))`, and likewise with
-  `Unmarshalers`.
-- `ISO8601` takes a sign only in front, as in `-PT30S`. It rejects Java's negative durations, such as `PT-30S`.
-- `ISO8601` reads designators in either case and a decimal comma, so `pt1,5s` is 1.5s.
+- Decoding checks the format, not the value: `"-1s"` and `"0s"` are read. Check ranges after decoding.
+- Numeric formats reject exponents, as in `1e-05`, which some encoders such as Swift's write for small numbers.
+- Digits below a nanosecond are truncated, not rounded. No format rounds to whole units: `Milli` writes `1.234567`.
+- The largest duration is about 292 years, `PT2562047H47M16.854775807S`; anything larger is `strconv.ErrRange`.
+- `ISO8601` takes one sign, `-` or `+`, only in front, as in `-PT30S`. It rejects Java's negative durations, such as
+  `PT-30S`. It reads designators in either case and a decimal comma, so `pt1,5s` is 1.5s. A count of zero must have
+  no fraction: `"P0D"` is read, `"P0.0D"` is not. Output is always the shortest form, so `"P0DT2H"` comes back as
+  `"PT2H"`.
+- `Units` reads what `time.ParseDuration` reads. So it reads protobuf's `"3600s"` but writes `"1h0m0s"`, and it does
+  not read Rust humantime's `"1h 30m"` or PostgreSQL's `"01:30:00"`. PostgreSQL writes ISO 8601 with
+  `intervalstyle = iso_8601`.
+- Decoding into `any` gives the JSON as it is, such as the string `"PT1S"`, since the type is unknown there.
+- Maps are written in random order, as for every map in `encoding/json/v2`, unless you pass `json.Deterministic(true)`.
 - If nanoseconds are all you need, `encoding/json` has an option for the v2 functions:
   `jsonv1.FormatDurationAsNano(true)`.
 
