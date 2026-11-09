@@ -216,6 +216,8 @@ d, err := jsonduration.Sec.Parse("5400.5")    // 1h30m0.5s
 - Decoding accepts only the formats you configured.
 - To tell a bad duration in the input from other errors, as for a 400 Bad Request, check
   `errors.Is(err, jsonduration.ErrInvalidDuration)`. The `json.SemanticError` around it says where in the input it is.
+- Such an error also matches its cause: `strconv.ErrSyntax`, `strconv.ErrRange`, `jsonduration.ErrCalendarUnits`, or
+  `jsonduration.ErrWrongType` for a JSON value of the wrong type, such as a number where `ISO8601` wants a string.
 - JSON `null` sets a duration to zero, and a `*time.Duration` to nil.
 - Named types such as `type TTL time.Duration` are not `time.Duration`, so `With` does not affect them, and they are
   written as plain integers of nanoseconds.
