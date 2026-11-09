@@ -38,6 +38,9 @@ func TestParseUnits(t *testing.T) {
 		{"9223372036854775808ns", 0, strconv.ErrRange},
 		{"99999999999999999999999ns", 0, strconv.ErrRange},
 		{"2562047h47m16.854775807s1ns", 0, strconv.ErrRange},
+		// The largest sum below the range plus a component above it: an unchecked sum would be exactly 2⁶⁴, which a
+		// uint64 holds as 0.
+		{"9223372036854775807ns2562048h", 0, strconv.ErrRange},
 	}
 
 	testParse(t, Units, tests)

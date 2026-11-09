@@ -407,6 +407,16 @@ func TestAlsoAccept(t *testing.T) {
 			t.Errorf("Unmarshal error = %v, want the error of ISO 8601 alone", err)
 		}
 	})
+
+	t.Run("keeps the formats after a duplicate", func(t *testing.T) {
+		withDuplicate := With(ISO8601, AlsoAccept(ISO8601, Units))
+
+		var d time.Duration
+		err := json.Unmarshal([]byte(`"1h"`), &d, withDuplicate)
+		if err != nil || d != time.Hour {
+			t.Errorf("Unmarshal = %v, %v, want 1h", d, err)
+		}
+	})
 }
 
 func TestAlsoAcceptErrors(t *testing.T) {

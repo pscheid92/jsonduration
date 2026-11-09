@@ -1,5 +1,6 @@
 fuzz_targets := "FuzzRoundTrip FuzzParse FuzzParseMatchesReference FuzzUnmarshal FuzzUnitsMatchesParseDuration"
 compat_fuzz_targets := "FuzzMarshalMatchesFormatTag FuzzUnmarshalMatchesFormatTag"
+mutation_threshold := "100"
 
 default:
     just --list
@@ -38,6 +39,18 @@ coverage:
 # Lint the GitHub workflows, with shellcheck on their scripts where it is installed.
 actionlint:
     go run github.com/rhysd/actionlint/cmd/actionlint@latest
+
+# Enables every kind of change that gremlins knows, and fails unless at least `threshold` percent of the covered changes
+# make a test fail. Every change so far has, but a new one may not be able to, since it may not change what the code
+# does: then check it, and lower the threshold only if no test can tell. The version is pinned, because a new one can
+# bring new kinds of change. Gremlins reports changes to constants and to case expressions as not covered, because
+# `go test -cover` counts neither; the tests check them all the same.
+#
+# Mutation testing: change the code in small ways, one at a time, and check that a test fails for each change.
+mutate threshold=mutation_threshold:
+    go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
+        --invert-logical --invert-loopctrl --invert-assignments --invert-bitwise --invert-bwassign \
+        --remove-self-assignments --threshold-efficacy {{ threshold }}
 
 # Scan for known vulnerabilities in the code that is actually reached.
 vuln:
