@@ -274,4 +274,4 @@ just mutate       # mutation testing with gremlins, which takes a few minutes
 ## License
 
 BSD 3-Clause, see [LICENSE](LICENSE). Parts of the codecs are adapted from the Go standard library, whose notice is
-included there.
+in [NOTICE](NOTICE).

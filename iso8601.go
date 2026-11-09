@@ -1,4 +1,4 @@
-// Based on encoding/json/v2/arshal_time.go (Go 1.27.3), Copyright 2020 The Go Authors; see LICENSE.
+// Based on encoding/json/v2/arshal_time.go (Go 1.27.3), Copyright 2020 The Go Authors; see NOTICE.
 
 package jsonduration
 
