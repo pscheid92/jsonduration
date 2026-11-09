@@ -34,6 +34,10 @@ coverage:
     go test -count=1 -coverprofile=coverage.out ./...
     go tool cover -func=coverage.out
 
+# Lint the GitHub workflows, with shellcheck on their scripts where it is installed.
+actionlint:
+    go run github.com/rhysd/actionlint/cmd/actionlint@latest
+
 # Scan for known vulnerabilities in the code that is actually reached.
 vuln:
     go run golang.org/x/vuln/cmd/govulncheck@latest ./...
@@ -45,4 +49,4 @@ fuzz time="30s" *targets=fuzz_targets:
 bench:
     go test -run='^$' -bench=. -benchmem ./...
 
-check: fix-check vet lint test vuln
+check: fix-check vet lint actionlint test vuln
