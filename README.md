@@ -16,6 +16,7 @@ go get github.com/pscheid92/jsonduration
 ```
 
 It requires Go 1.27 or later, has no dependencies outside the standard library, and supports `encoding/json/v2` only.
+With `encoding/json` (v1), use v2 or a field type of your own; this package is not tested with v1.
 Until v1.0.0 the API may still change.
 
 ## Usage
