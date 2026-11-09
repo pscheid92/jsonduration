@@ -89,7 +89,7 @@ func ExampleAlsoAccept() {
 	// {"timeout":"PT1M30S"} <nil>
 }
 
-// Read days from a service that means 24 hours by one, as Java's Duration.parse does.
+// Read what Python's Pydantic writes for a timedelta of 36 hours, where a day is exactly 24 hours.
 func ExampleAcceptDays() {
 	opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AcceptDays())
 

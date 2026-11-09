@@ -52,7 +52,7 @@ func (iso8601Codec) appendTo(b []byte, d time.Duration) []byte {
 // Only the last component may have a fraction, after "."
 // or ",", and of the accepted units only hours, minutes, and seconds can have one.
 //
-// With acceptDays, days and weeks count as 24 hours and 7 days, as in Java's Duration.parse.
+// With acceptDays, days and weeks count as 24 hours and 7 days.
 //
 // Unlike encoding/json/v2, it rejects calendar units outright,
 // computes fractions of hours and minutes exactly instead of through float64,

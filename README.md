@@ -163,7 +163,8 @@ nanoseconds.
 ### ISO 8601 days
 
 `ISO8601` rejects days, weeks, months, and years, because a calendar day is not always 24 hours long. If the other side
-means exactly 24 hours by a day, as Java's `Duration.parse` does, add `AcceptDays`:
+means exactly 24 hours by a day, add `AcceptDays`. Python's Pydantic, and so FastAPI, writes a `timedelta` of 36 hours
+as `"P1DT12H"`, and .NET's `XmlConvert` does the same for a `TimeSpan`:
 
 ```go
 opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AcceptDays())
