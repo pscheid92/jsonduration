@@ -12,14 +12,18 @@ on:
 permissions:
   contents: read
 
+# A new run replaces the one before it for the same branch or pull request. The event is part of the group, so that a
+# merge does not cancel the nightly run, and the nightly run does not cancel the build of a merge.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      GOLANGCI_LINT_VERSION: v2.15.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,7 +39,12 @@ jobs:
       - run: just compat
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: latest
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+      # internal/compat is a module of its own, which the step above does not reach.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: internal/compat
       - run: just coverage
       - name: Coverage is 100%
         run: |
@@ -84,18 +93,32 @@ jobs:
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       - run: just test-32bit
 
+  # Asks the tests of both modules for their fuzz targets, so that the fuzz job cannot miss a new one.
+  fuzz-targets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - id: list
+        run: |
+          matrix=$(just fuzz-matrix)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   fuzz:
+    needs: fuzz-targets
+    name: fuzz (${{ matrix.target }}, ${{ matrix.recipe }})
     strategy:
       fail-fast: false
-      matrix:
-        target: [ FuzzRoundTrip, FuzzParse, FuzzParseMatchesReference, FuzzUnmarshal, FuzzUnitsMatchesParseDuration ]
-        recipe: [ fuzz ]
-        include:
-          # The comparison with the removed `format` tag option, in the internal/compat module.
-          - target: FuzzMarshalMatchesFormatTag
-            recipe: compat-fuzz
-          - target: FuzzUnmarshalMatchesFormatTag
-            recipe: compat-fuzz
+      matrix: ${{ fromJSON(needs.fuzz-targets.outputs.matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
