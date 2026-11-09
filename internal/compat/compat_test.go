@@ -135,6 +135,7 @@ func FuzzUnmarshalMatchesFormatTag(f *testing.F) {
 	seeds := []string{
 		`"1h30m"`, `"-1.5s"`, `"+.5h"`, `"1.s"`, `"PT1H30M"`, `"-PT0.5S"`, `"PT0.99999999999999999999H"`, `"PT1.e5H"`,
 		`"P1D"`, `"P1Y2M"`, `1.5`, `-0`, `-0.0000000001`, `9223372036.854775807`, `"1.5"`, `null`, `true`, `1e3`,
+		`".9007199279999999s"`,
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -179,12 +180,48 @@ func intendedDifference(f jsonduration.Format, value string, want time.Duration,
 	value = strings.Trim(value, " \t\r\n")
 
 	switch {
+	case f == jsonduration.Units:
+		return roundsFractionsThroughFloat(value, want, wantErr, got, err)
 	case isNumeric(f) && errors.Is(wantErr, strconv.ErrRange) && err == nil && got == 0:
 		return negativeZero.MatchString(value)
 	case f == jsonduration.ISO8601 && wantErr == nil && errors.Is(err, strconv.ErrSyntax):
 		return fractionStartingWithE.MatchString(value)
 	case f == jsonduration.ISO8601 && wantErr == nil && err == nil && want-got == 1:
 		return fractionOfHoursOrMinutes.MatchString(value)
+	}
+
+	return false
+}
+
+// roundsFractionsThroughFloat reports whether the results for Units differ only as far as time.ParseDuration, which
+// the tag option uses, rounds fractions through float64: by at most a nanosecond for each fraction, which at the end of
+// the range can also decide whether a value is in range at all.
+func roundsFractionsThroughFloat(value string, want time.Duration, wantErr error, got time.Duration, err error) bool {
+	var s string
+	if json.Unmarshal([]byte(value), &s) != nil {
+		return false
+	}
+
+	slack := uint64(strings.Count(s, "."))
+	near := func(a, b time.Duration) bool {
+		if a < b {
+			a, b = b, a
+		}
+
+		return uint64(a)-uint64(b) <= slack
+	}
+
+	nearLimit := func(d time.Duration) bool {
+		return near(d, math.MaxInt64) || near(d, math.MinInt64)
+	}
+
+	switch {
+	case err == nil && wantErr == nil:
+		return near(got, want)
+	case err == nil:
+		return nearLimit(got)
+	case wantErr == nil:
+		return nearLimit(want) && errors.Is(err, strconv.ErrRange)
 	}
 
 	return false
@@ -223,6 +260,10 @@ func TestDifferencesFromFormatTag(t *testing.T) {
 		{
 			jsonduration.ISO8601, `"PT0.0000000000002H"`, value(1), zero,
 			"jsonduration truncates exactly, encoding/json/v2 rounds through float64",
+		},
+		{
+			jsonduration.Units, `".9007199279999999s"`, value(900719928), value(900719927),
+			"jsonduration truncates exactly, time.ParseDuration rounds through float64",
 		},
 		{
 			jsonduration.ISO8601, `"P1D"`, failure, calendarError,
