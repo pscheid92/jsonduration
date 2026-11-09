@@ -148,9 +148,10 @@ Timeout jsonduration.ISO8601Duration `json:"timeout"`
 
 Stored data stays readable, since each format writes what the tag option of the same name wrote. A test checks this
 against the tag option itself, whose code the standard library still contains and which go-json-experiment's
-`ExperimentalSupportFormatTag` turns back on. Decoding differs only where jsonduration is stricter or exact:
+`ExperimentalSupportFormatTag` turns back on. Decoding differs only in these ways:
 
 - It reads `-0` as zero, where the tag option reports it as out of range.
+- It reads days, weeks, months, and years with a count of zero, as in `"P0D"`, which the tag option rejects.
 - It rejects a fraction that is not all digits, such as `"PT1.e5H"`, which the tag option reads as one hour.
 - It truncates fractions exactly, where the tag option rounds them through `float64`: in `Units` all of them, in
   `ISO8601` those of hours and minutes. So the last nanosecond can differ, as for `".9007199279999999s"` or
@@ -183,6 +184,10 @@ opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AcceptDays())
 ```
 
 Months and years are still rejected, and output never uses days.
+
+A count of zero is the exception, with or without `AcceptDays`: zero days are no time at all, however long a day is.
+So `ISO8601` reads `"P0D"`, which moment.js and Python's isodate write for a zero duration, and
+`"P0Y0M0DT1H30M0S"`, as date-fns writes every duration.
 
 ### Choosing the format at run time
 
