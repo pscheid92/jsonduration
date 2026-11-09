@@ -16,6 +16,7 @@ linters:
     - goprintffuncname
     - gosec
     - intrange
+    - lll
     - misspell
     - nakedret
     - nilerr
@@ -34,6 +35,9 @@ linters:
         text: "G115|G404"
 
   settings:
+    lll:
+      line-length: 120
+      tab-width: 4
     godot:
       scope: toplevel
     nakedret:

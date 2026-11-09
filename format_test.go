@@ -217,7 +217,8 @@ func FuzzRoundTrip(f *testing.F) {
 			}
 
 			if len(s) > maxPossibleOutputLength {
-				t.Fatalf("%s.Format(%d) = %q, longer than maxPossibleOutputLength = %d", fm, n, s, maxPossibleOutputLength)
+				t.Fatalf("%s.Format(%d) = %q, longer than maxPossibleOutputLength = %d",
+					fm, n, s, maxPossibleOutputLength)
 			}
 		}
 	})

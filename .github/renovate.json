@@ -7,10 +7,41 @@
     "group:allNonMajor"
   ],
   "timezone": "Europe/Berlin",
+  "customManagers": [
+    {
+      "description": "Tools the justfile starts with go run, where the command line names the version",
+      "customType": "regex",
+      "managerFilePatterns": ["/^justfile$/"],
+      "matchStrings": [
+        "go run (?<depName>(?:github\\.com/[^/]+|golang\\.org/x)/[^/]+)/cmd/\\S+@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "go"
+    },
+    {
+      "description": "The golangci-lint version, which CI passes to the action that installs it",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": ["GOLANGCI_LINT_VERSION: (?<currentValue>v\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
   "packageRules": [
     {
-      "description": "The go directive is the oldest Go a user of the library needs, and CI tests the versions in its matrix; raising it is a decision, not a routine update",
+      "description": [
+        "The go directive is the oldest Go a user of the library needs, and CI tests the versions in its matrix;",
+        "raising it is a decision, not a routine update"
+      ],
       "matchDatasources": ["golang-version"],
+      "enabled": false
+    },
+    {
+      "description": [
+        "internal/compat requires the library only to replace it with the directory above it, so the version in its",
+        "go.mod means nothing"
+      ],
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/pscheid92/jsonduration"],
       "enabled": false
     }
   ]
