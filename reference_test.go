@@ -129,7 +129,9 @@ func referenceISO8601(s string, acceptDays bool) (time.Duration, error) {
 		}
 		fraction, hasFraction := group(fractionGroup)
 
-		calendar := i <= 1 || i <= 3 && !acceptDays
+		// A count of zero is no time at all, whatever the length of the unit.
+		isZero := present && strings.Trim(whole, "0") == "" && !hasFraction
+		calendar := (i <= 1 || i <= 3 && !acceptDays) && !isZero
 		components = append(components, component{whole, fraction, present, hasFraction, unit, calendar})
 	}
 
@@ -350,6 +352,7 @@ func FuzzParseMatchesReference(f *testing.F) {
 		"-9223372036854775808ns", "9223372036854775808ns", "2562047h47m16.854775807s", "1µs", "1μs", "1h1h",
 		"5400.5", "-0.000000001", "9223372036.854775807", "-9223372036.854775808", "01", "1.", "1e3",
 		"PT1H30M0.5S", "pt1h30m", "+PT1,5S", "-PT2562047H47M16.854775808S", "P1D", "P1W2DT1.5H", "P0.5D", "P1.5Y",
+		"P0D", "P0Y0M0DT1H30M0S", "P0Y1D", "P0.0D", "P00W",
 		"PT1.5H30M", "P1DT", "PT", "P", "P106751DT23H47M16.854775807S", "P106752D", "PT0.0000000000002H",
 		"", "-", "+", "PT1.5.5S", "99999999999999999999", "P99999999999999999999D",
 	}

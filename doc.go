@@ -49,6 +49,7 @@
 //
 // [ISO8601] rejects years, months, weeks, and days with [ErrCalendarUnits], since their length varies.
 // Where a producer means 24 hours by a day, [AcceptDays] reads days and weeks.
+// A count of zero, as in "P0D", is always read: it is no time at all, whatever the length of the unit.
 //
 // The numeric formats read JSON numbers without an exponent, such as 5400.5 but not 5.4005e3.
 // Every format reads decimals exactly, without floating-point rounding, and drops digits below one nanosecond.

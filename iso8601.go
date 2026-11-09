@@ -54,7 +54,7 @@ func (iso8601Codec) appendTo(b []byte, d time.Duration) []byte {
 //
 // With acceptDays, days and weeks count as 24 hours and 7 days.
 //
-// Unlike encoding/json/v2, it rejects calendar units outright,
+// Unlike encoding/json/v2, it rejects calendar units outright, except for a count of zero as in "P0D",
 // computes fractions of hours and minutes exactly instead of through float64,
 // and rejects a fraction that is not all digits, as in "PT1.e5H".
 func (iso iso8601Codec) parse(b []byte) (time.Duration, error) {
@@ -174,6 +174,8 @@ func (sum *isoSum) take(s []byte, c isoComponent) ([]byte, bool) {
 
 	isCalendar := c.kind == calendarUnit || c.kind == dayUnit && !sum.acceptDays
 	switch {
+	case isCalendar && isZeros(whole) && !hasFraction:
+		// Nothing to add: zero years are no time at all, however long a year is.
 	case isCalendar:
 		sum.calendarUnits = true
 	case c.kind == dayUnit && hasFraction:

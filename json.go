@@ -73,7 +73,7 @@ func AlsoAccept(formats ...Format) DecodeOption {
 
 // AcceptDays makes [ISO8601] decoding read a day as exactly 24 hours and a week as 7 days: "P1DT12H" is 36h.
 // Python's Pydantic and .NET's XmlConvert write every duration of a day or more with days.
-// Years and months are still rejected, and days and weeks take no fraction.
+// Years and months are still rejected unless their count is zero, and days and weeks take no fraction.
 // Only JSON decoding is affected: encoding never writes days, and [Format.Parse] and [ISO8601Duration] stay strict.
 //
 // Use it only where the producer means 24 hours by a day:
