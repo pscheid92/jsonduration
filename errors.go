@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // ErrInvalidDuration is matched by every error about a duration that could not be read,
@@ -24,6 +25,11 @@ var ErrInvalidDuration = errors.New("invalid duration")
 // "P0Y0M0DT1H" are read in every mode. Some producers write zero as "P0D", and some write every component.
 var ErrCalendarUnits = errors.New("calendar units have no fixed length")
 
+// ErrWrongType is matched by the error for a JSON value of a type that no accepted format reads, such as a number for
+// [ISO8601] or a string for [Sec]. The error says which type it wants, as in "want a JSON string".
+// Use it to tell a client that sent the wrong type from one that sent a malformed duration.
+var ErrWrongType = errors.New("wrong JSON type")
+
 // errInvalidDuration builds every error about a duration that could not be read:
 // text failed in formats, such as "iso8601" or "iso8601 or nano", because of cause.
 func errInvalidDuration(text []byte, formats string, cause error) error {
@@ -31,12 +37,23 @@ func errInvalidDuration(text []byte, formats string, cause error) error {
 }
 
 // quote quotes at most maxQuoted bytes of input, since an error message may go back to whoever sent the input.
+// It does not cut a UTF-8 character in two, which would show as a replacement character that the input never held.
 func quote(input []byte) string {
-	if len(input) > maxQuoted {
-		return strconv.Quote(string(input[:maxQuoted])) + "..."
+	if len(input) <= maxQuoted {
+		return strconv.Quote(string(input))
 	}
 
-	return strconv.Quote(string(input))
+	// A character has at most utf8.UTFMax bytes, so the one around the cut starts at most utf8.UTFMax-1 bytes
+	// before it. Text without a first byte there is not UTF-8, and is cut where it is.
+	cut := maxQuoted
+	for back := range utf8.UTFMax {
+		if utf8.RuneStart(input[maxQuoted-back]) {
+			cut = maxQuoted - back
+			break
+		}
+	}
+
+	return strconv.Quote(string(input[:cut])) + "..."
 }
 
 // maxQuoted is how many bytes of a bad input an error quotes, far more than any valid duration or format name has.
@@ -50,9 +67,18 @@ func errUnknownUnit(name []byte) error {
 	return fmt.Errorf("unknown unit %s: %w", quote(name), strconv.ErrSyntax)
 }
 
-// errWrongKind is the cause for a JSON value of a kind that no accepted format reads, such as a number for ISO8601.
-func errWrongKind(want string) error {
-	return fmt.Errorf("want a JSON %s", want)
+// A wrongKindError is the cause for a JSON value of a kind that no accepted format reads, such as a number for
+// ISO8601. It names the kinds that are read, such as "string or number", and matches [ErrWrongType].
+type wrongKindError struct {
+	want string
+}
+
+func (e wrongKindError) Error() string {
+	return "want a JSON " + e.want
+}
+
+func (e wrongKindError) Is(target error) bool {
+	return target == ErrWrongType
 }
 
 // errUnknownFormat reports a format name, from a flag or a configuration, that is not the name of a format.

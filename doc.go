@@ -65,7 +65,8 @@
 //
 // The cause is [strconv.ErrSyntax], [strconv.ErrRange], or [ErrCalendarUnits], which the error wraps.
 // With formats from [AlsoAccept], it is a syntax error only if every format rejects the syntax.
-// Only a JSON value of the wrong kind, such as a number for ISO8601, has a cause of its own: "want a JSON string".
+// A JSON value of the wrong type, such as a number for ISO8601, has a cause of its own, which matches [ErrWrongType]
+// and reads "want a JSON string".
 // JSON decoding returns the error inside a json.SemanticError, as encoding/json/v2 does for other types.
 // Its JSONPointer tells where in the input the duration is.
 // A format name that [Format.UnmarshalText] does not know is an error that lists the valid names.

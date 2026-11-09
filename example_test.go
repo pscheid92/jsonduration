@@ -133,6 +133,24 @@ func ExampleErrInvalidDuration() {
 	// invalid duration "90s" in format iso8601: invalid syntax
 }
 
+func ExampleErrWrongType() {
+	opts := jsonduration.With(jsonduration.ISO8601)
+
+	var d time.Duration
+	err := json.Unmarshal([]byte(`90`), &d, opts)
+	fmt.Println(errors.Is(err, jsonduration.ErrWrongType))
+	fmt.Println(errors.Is(err, jsonduration.ErrInvalidDuration))
+
+	if semantic, ok := errors.AsType[*json.SemanticError](err); ok {
+		fmt.Println(semantic.Err)
+	}
+
+	// Output:
+	// true
+	// true
+	// invalid duration "90" in format iso8601: want a JSON string
+}
+
 func ExampleFormat_Format() {
 	d := 90*time.Minute + 500*time.Millisecond
 

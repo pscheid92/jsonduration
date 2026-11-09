@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -94,6 +95,13 @@ func TestErrInvalidDuration(t *testing.T) {
 		}
 	}
 
+	wrongType := map[string]bool{"wrong JSON kind": true}
+	for name, fn := range invalid {
+		if got := errors.Is(fn(), ErrWrongType); got != wrongType[name] {
+			t.Errorf("%s: errors.Is(err, ErrWrongType) = %v, want %v", name, got, wrongType[name])
+		}
+	}
+
 	other := map[string]func() error{
 		"invalid Format": func() error { _, err := unknown.MarshalText(); return err },
 		"unknown name":   func() error { var f Format; return f.UnmarshalText([]byte("weeks")) },
@@ -121,6 +129,40 @@ func TestErrInvalidDuration(t *testing.T) {
 		_, err := Units.Parse(long)
 
 		want := `invalid duration "` + long[:64] + `"... in format units: invalid syntax`
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v, want %s", err, want)
+		}
+	})
+
+	t.Run("does not cut a character in two", func(t *testing.T) {
+		// Each character straddles byte 64: é has 2 bytes, € has 3 and 😀 has 4.
+		tests := []struct {
+			prefix int
+			char   string
+			kept   int
+		}{
+			{64, "é", 64}, {63, "é", 63},
+			{63, "€", 63}, {62, "€", 62},
+			{63, "😀", 63}, {62, "😀", 62}, {61, "😀", 61},
+			{60, "😀", 64}, {62, "é", 64}, {61, "€", 64},
+		}
+
+		for _, tt := range tests {
+			in := strings.Repeat("x", tt.prefix) + tt.char + strings.Repeat("x", 10)
+			_, err := Units.Parse(in)
+
+			want := `invalid duration "` + in[:tt.kept] + `"... in format units: invalid syntax`
+			if err == nil || err.Error() != want {
+				t.Errorf("%d bytes and then %s: error = %v, want %s", tt.prefix, tt.char, err, want)
+			}
+		}
+	})
+
+	t.Run("cuts text that is not UTF-8 at 64 bytes", func(t *testing.T) {
+		in := strings.Repeat("\x80", 100)
+		_, err := Units.Parse(in)
+
+		want := "invalid duration " + strconv.Quote(in[:64]) + "... in format units: invalid syntax"
 		if err == nil || err.Error() != want {
 			t.Errorf("error = %v, want %s", err, want)
 		}

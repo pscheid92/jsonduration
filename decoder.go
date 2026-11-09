@@ -164,7 +164,7 @@ func (dc *decoder) wrongKind(quoted bool) error {
 		want = "number"
 	}
 
-	return errWrongKind(want)
+	return wrongKindError{want}
 }
 
 // names returns the formats for error messages, such as "iso8601 or nano".
