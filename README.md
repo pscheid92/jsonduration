@@ -107,6 +107,23 @@ func main() {
 Wrapper types embed `time.Duration`, so its methods keep working, as in `cfg.Timeout.Minutes()` or
 `time.Sleep(cfg.Backoff.Duration)`.
 
+A wrapper type writes and reads only its own format, and `AlsoAccept` and `AcceptDays` do not change it. If a field
+needs one of them, write a wrapper type of your own, which takes a few lines:
+
+```go
+var daysOptions = jsonduration.With(jsonduration.ISO8601, jsonduration.AcceptDays())
+
+type DaysDuration struct{ time.Duration }
+
+func (d DaysDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return json.MarshalEncode(enc, d.Duration, daysOptions)
+}
+
+func (d *DaysDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return json.UnmarshalDecode(dec, &d.Duration, daysOptions)
+}
+```
+
 ## Formats
 
 | Format      | Name        | Wrapper type        | JSON type | 1h30m0.5s becomes |
@@ -248,7 +265,8 @@ implementation of the same thing:
   must agree except where [the list above](#replacing-the-format-tag) says otherwise.
 - **Reference parsers.** A second parser for every format, built from regular expressions and `math/big` and sharing
   no code with the package, must agree on every input: whether it is accepted, its value, and the cause of an error.
-- **`time.ParseDuration`.** `Units` must read exactly what it reads, with the same value.
+- **`time.ParseDuration`.** `Units` must read what it reads, with the same value. Only fractions may differ, by the
+  last nanosecond, because `time.ParseDuration` rounds them through `float64`.
 - **Real producers.** Tests hold what Pydantic and .NET's `XmlConvert` write, which `AcceptDays` must read, and where
   `ISO8601` differs from Java's `Duration` on purpose.
 - **Fuzzing.** Every comparison but the one with real producers is also a fuzz target. CI runs each target for 45

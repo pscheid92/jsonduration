@@ -19,7 +19,8 @@
 //
 // Each format also has a wrapper type, such as [ISO8601Duration] or [SecDuration].
 // It embeds a time.Duration, encodes itself without options, and writes and reads only its own format:
-// [With], [AlsoAccept], and [AcceptDays] do not change it.
+// [With], [AlsoAccept], and [AcceptDays] do not change it. If a field needs one of them, write a wrapper type of
+// your own, as the example of [AcceptDays] shows.
 //
 //	type Config struct {
 //		Timeout jsonduration.ISO8601Duration `json:"timeout"`
