@@ -152,8 +152,9 @@ against the tag option itself, whose code the standard library still contains an
 
 - It reads `-0` as zero, where the tag option reports it as out of range.
 - It rejects a fraction that is not all digits, such as `"PT1.e5H"`, which the tag option reads as one hour.
-- It truncates fractions of hours and minutes exactly, where the tag option rounds them through `float64`, so the
-  last nanosecond can differ, as for `"PT0.99999999999999999999H"`.
+- It truncates fractions exactly, where the tag option rounds them through `float64`: in `Units` all of them, in
+  `ISO8601` those of hours and minutes. So the last nanosecond can differ, as for `".9007199279999999s"` or
+  `"PT0.99999999999999999999H"`, and at the very end of the range one may reject what the other accepts.
 - The `string` tag option has no effect on `Units` and `ISO8601`, where the tag option rejects it.
 - Its errors name their cause, such as `strconv.ErrSyntax` or `ErrCalendarUnits`.
 
