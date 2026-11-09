@@ -19,7 +19,8 @@
 //
 // Each format also has a wrapper type, such as [ISO8601Duration] or [SecDuration].
 // It embeds a time.Duration, encodes itself without options, and writes and reads only its own format:
-// [With], [AlsoAccept], and [AcceptDays] do not change it.
+// [With], [AlsoAccept], and [AcceptDays] do not change it. If a field needs one of them, write a wrapper type of
+// your own, as the example of [AcceptDays] shows.
 //
 //	type Config struct {
 //		Timeout jsonduration.ISO8601Duration `json:"timeout"`
@@ -48,6 +49,7 @@
 //
 // [ISO8601] rejects years, months, weeks, and days with [ErrCalendarUnits], since their length varies.
 // Where a producer means 24 hours by a day, [AcceptDays] reads days and weeks.
+// A count of zero, as in "P0D", is always read: it is no time at all, whatever the length of the unit.
 //
 // The numeric formats read JSON numbers without an exponent, such as 5400.5 but not 5.4005e3.
 // Every format reads decimals exactly, without floating-point rounding, and drops digits below one nanosecond.

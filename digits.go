@@ -93,6 +93,12 @@ func isDigits(s []byte) bool {
 	return len(digits) > 0 && len(rest) == 0
 }
 
+// isZeros reports whether s holds no digit other than 0.
+func isZeros(s []byte) bool {
+	_, rest := cutWhile(s, func(c byte) bool { return c == '0' })
+	return len(rest) == 0
+}
+
 // isNatural reports whether s is a number without leading zeros, such as 0 or 42.
 func isNatural(s []byte) bool {
 	return isDigits(s) && (s[0] != '0' || len(s) == 1)

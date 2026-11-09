@@ -48,6 +48,32 @@ func TestAcceptDaysReadsWhatProducersWrite(t *testing.T) {
 	}
 }
 
+// TestISO8601ReadsZeroCalendarUnits pins durations as producers write them that name calendar units with a count of
+// zero. ISO8601 reads them without AcceptDays, since zero days are no time at all.
+func TestISO8601ReadsZeroCalendarUnits(t *testing.T) {
+	tests := []struct {
+		producer string
+		in       string
+		want     time.Duration
+	}{
+		{"moment.duration(0).toISOString()", `"P0D"`, 0},
+		{"isodate.duration_isoformat(timedelta(0))", `"P0D"`, 0},
+		{"date-fns formatISODuration({})", `"P0Y0M0DT0H0M0S"`, 0},
+		{"date-fns formatISODuration({hours: 1, minutes: 30})", `"P0Y0M0DT1H30M0S"`, 90 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.producer, func(t *testing.T) {
+			var d time.Duration
+			err := json.Unmarshal([]byte(tt.in), &d, With(ISO8601))
+
+			if err != nil || d != tt.want {
+				t.Errorf("Unmarshal(%s) = %v, %v, want %v", tt.in, d, err, tt.want)
+			}
+		})
+	}
+}
+
 // TestISO8601DiffersFromJava lists every difference from Java's Duration.parse that a comparison on tricky input
 // found, run with Java 26 on 2026-11-08, and why each one is intended. Both read the rest of that input alike.
 func TestISO8601DiffersFromJava(t *testing.T) {

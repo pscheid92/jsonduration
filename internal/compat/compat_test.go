@@ -136,7 +136,7 @@ func FuzzUnmarshalMatchesFormatTag(f *testing.F) {
 	seeds := []string{
 		`"1h30m"`, `"-1.5s"`, `"+.5h"`, `"1.s"`, `"PT1H30M"`, `"-PT0.5S"`, `"PT0.99999999999999999999H"`, `"PT1.e5H"`,
 		`"P1D"`, `"P1Y2M"`, `1.5`, `-0`, `-0.0000000001`, `9223372036.854775807`, `"1.5"`, `null`, `true`, `1e3`,
-		`".9007199279999999s"`,
+		`".9007199279999999s"`, `"P0D"`, `"P0Y0M0DT1H30M0S"`, `"P0Y1D"`,
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -170,6 +170,9 @@ var (
 	// A fraction that starts with e or E, as in "PT1.e5H".
 	fractionStartingWithE = regexp.MustCompile(`[.,][eE]`)
 
+	// Calendar units with a count of zero and nothing else before the clock components, as in "P0D" or "P0Y0M0DT1H".
+	onlyZeroCalendarUnits = regexp.MustCompile(`(?i)^"[+-]?P(0+[YMWD])+(T.*)?"$`)
+
 	// A fraction of hours or minutes as the last component, as in "PT1.5H".
 	fractionOfHoursOrMinutes = regexp.MustCompile(`[.,]\d+[HhMm]"$`)
 )
@@ -189,6 +192,8 @@ func intendedDifference(f jsonduration.Format, value string, want time.Duration,
 		return fractionStartingWithE.MatchString(value)
 	case f == jsonduration.ISO8601 && wantErr == nil && err == nil && want-got == 1:
 		return fractionOfHoursOrMinutes.MatchString(value)
+	case f == jsonduration.ISO8601 && wantErr != nil && err == nil:
+		return onlyZeroCalendarUnits.MatchString(value)
 	}
 
 	return false
@@ -265,6 +270,14 @@ func TestDifferencesFromFormatTag(t *testing.T) {
 		{
 			jsonduration.Units, `".9007199279999999s"`, value(900719928), value(900719927),
 			"jsonduration truncates exactly, time.ParseDuration rounds through float64",
+		},
+		{
+			jsonduration.ISO8601, `"P0D"`, failure, zero,
+			"zero days are no time at all, and some producers write zero this way",
+		},
+		{
+			jsonduration.ISO8601, `"P0Y0M0DT1H30M0S"`, failure, value(90 * time.Minute),
+			"some producers write every component, and a count of zero is no time at all",
 		},
 		{
 			jsonduration.ISO8601, `"P1D"`, failure, calendarError,

@@ -107,6 +107,23 @@ func main() {
 Wrapper types embed `time.Duration`, so its methods keep working, as in `cfg.Timeout.Minutes()` or
 `time.Sleep(cfg.Backoff.Duration)`.
 
+A wrapper type writes and reads only its own format, and `AlsoAccept` and `AcceptDays` do not change it. If a field
+needs one of them, write a wrapper type of your own, which takes a few lines:
+
+```go
+var daysOptions = jsonduration.With(jsonduration.ISO8601, jsonduration.AcceptDays())
+
+type DaysDuration struct{ time.Duration }
+
+func (d DaysDuration) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return json.MarshalEncode(enc, d.Duration, daysOptions)
+}
+
+func (d *DaysDuration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	return json.UnmarshalDecode(dec, &d.Duration, daysOptions)
+}
+```
+
 ## Formats
 
 | Format      | Name        | Wrapper type        | JSON type | 1h30m0.5s becomes |
@@ -148,9 +165,10 @@ Timeout jsonduration.ISO8601Duration `json:"timeout"`
 
 Stored data stays readable, since each format writes what the tag option of the same name wrote. A test checks this
 against the tag option itself, whose code the standard library still contains and which go-json-experiment's
-`ExperimentalSupportFormatTag` turns back on. Decoding differs only where jsonduration is stricter or exact:
+`ExperimentalSupportFormatTag` turns back on. Decoding differs only in these ways:
 
 - It reads `-0` as zero, where the tag option reports it as out of range.
+- It reads days, weeks, months, and years with a count of zero, as in `"P0D"`, which the tag option rejects.
 - It rejects a fraction that is not all digits, such as `"PT1.e5H"`, which the tag option reads as one hour.
 - It truncates fractions exactly, where the tag option rounds them through `float64`: in `Units` all of them, in
   `ISO8601` those of hours and minutes. So the last nanosecond can differ, as for `".9007199279999999s"` or
@@ -183,6 +201,10 @@ opts := jsonduration.With(jsonduration.ISO8601, jsonduration.AcceptDays())
 ```
 
 Months and years are still rejected, and output never uses days.
+
+A count of zero is the exception, with or without `AcceptDays`: zero days are no time at all, however long a day is.
+So `ISO8601` reads `"P0D"`, which moment.js and Python's isodate write for a zero duration, and
+`"P0Y0M0DT1H30M0S"`, as date-fns writes every duration.
 
 ### Choosing the format at run time
 
@@ -245,7 +267,8 @@ implementation of the same thing:
   must agree except where [the list above](#replacing-the-format-tag) says otherwise.
 - **Reference parsers.** A second parser for every format, built from regular expressions and `math/big` and sharing
   no code with the package, must agree on every input: whether it is accepted, its value, and the cause of an error.
-- **`time.ParseDuration`.** `Units` must read exactly what it reads, with the same value.
+- **`time.ParseDuration`.** `Units` must read what it reads, with the same value. Only fractions may differ, by the
+  last nanosecond, because `time.ParseDuration` rounds them through `float64`.
 - **Real producers.** Tests hold what Pydantic and .NET's `XmlConvert` write, which `AcceptDays` must read, and where
   `ISO8601` differs from Java's `Duration` on purpose.
 - **Fuzzing.** Every comparison but the one with real producers is also a fuzz target. CI runs each target for 45

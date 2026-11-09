@@ -20,6 +20,9 @@ var ErrInvalidDuration = errors.New("invalid duration")
 // such as "P1D" or "P0.5D".
 // Their length varies, a month from 28 to 31 days and a day from 23 to 25 hours, so they have no exact [time.Duration].
 // Where a day means 24 hours, [AcceptDays] reads days and weeks.
+//
+// A count of zero is not an error, since it is no time at all whatever the length of the unit: "P0D" and
+// "P0Y0M0DT1H" are read in every mode. Some producers write zero as "P0D", and some write every component.
 var ErrCalendarUnits = errors.New("calendar units have no fixed length")
 
 // ErrWrongType is matched by the error for a JSON value of a type that no accepted format reads, such as a number for
