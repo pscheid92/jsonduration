@@ -41,7 +41,7 @@ type Config struct {
 	Retries []time.Duration `json:"retries"`
 }
 
-// Options are safe for concurrent use, so create them once.
+// Options are safe for concurrent use.
 var opts = jsonduration.With(jsonduration.ISO8601)
 
 func main() {
@@ -55,8 +55,8 @@ func main() {
 }
 ```
 
-`encoding/json/v2` is part of the standard library since Go 1.27, with no `GOEXPERIMENT` setting. Creating the
-options costs about a dozen allocations, so create them once rather than per call.
+`encoding/json/v2` is part of the standard library since Go 1.27, with no `GOEXPERIMENT` setting. `With` builds the
+options on the first call and returns the same ones afterwards, so a later call costs a lookup and no allocation.
 
 If you already pass `json.WithMarshalers` or `json.WithUnmarshalers`, don't add `With` next to them: a second
 `WithMarshalers` option replaces the first, without an error. Join yours with the package's instead:
@@ -259,6 +259,13 @@ Every codec is compared with an independent implementation: the removed `format`
 parser built from regular expressions and `math/big`, and `time.ParseDuration`. Each comparison is also a fuzz target.
 On top of that come mutation testing every night, 100% statement coverage, and durations as real producers write
 them. [TESTING.md](TESTING.md) has the details.
+
+## How fast it is
+
+jsonduration allocates nothing of its own: writing and reading a duration allocates what an `int64` in the same place
+does. A duration in a struct field takes about 50 ns more to write and 60 to 100 ns more to read than an `int64`, on
+an Apple M2. `With` takes 5 ns, so there is no need to keep what it returns. In a struct with many fields, wrapper
+types are faster than options. [BENCHMARKS.md](BENCHMARKS.md) has the numbers and what they are compared with.
 
 ## Development
 

@@ -8,26 +8,19 @@ import (
 	"time"
 )
 
-// decimalCodec writes and reads the numeric formats [Sec], [Milli], [Micro], and [Nano]:
-// a JSON number of units, such as 5400.5 seconds. unit is the length of one unit in nanoseconds.
-type decimalCodec struct {
-	unit uint64
-}
+// The numeric formats [Sec], [Milli], [Micro], and [Nano] hold a JSON number of units, such as 5400.5 seconds.
+// Their functions take the length of one unit in nanoseconds.
 
-func (decimalCodec) numeric() bool {
-	return true
-}
-
-// appendTo writes d as a decimal number of units.
-func (c decimalCodec) appendTo(b []byte, d time.Duration) []byte {
+// appendDecimal writes d as a decimal number of units.
+func appendDecimal(b []byte, d time.Duration, unit uint64) []byte {
 	b, n := appendSign(b, d)
-	b = strconv.AppendUint(b, n/c.unit, 10)
-	return appendFraction(b, n%c.unit, c.unit)
+	b = strconv.AppendUint(b, n/unit, 10)
+	return appendFraction(b, n%unit, unit)
 }
 
-// parse reads a number of units as JSON writes numbers, but without an exponent:
+// parseDecimal reads a number of units as JSON writes numbers, but without an exponent:
 // an optional minus sign, 0 or digits without leading zeros, and optionally a point and more digits.
-func (c decimalCodec) parse(b []byte) (time.Duration, error) {
+func parseDecimal(b []byte, unit uint64) (time.Duration, error) {
 	s, neg := cutSign(b, false)
 
 	whole, fraction, hasPoint := bytes.Cut(s, []byte("."))
@@ -35,7 +28,7 @@ func (c decimalCodec) parse(b []byte) (time.Duration, error) {
 		return 0, strconv.ErrSyntax
 	}
 
-	d, fits := signed(scale(whole, fraction, c.unit), neg)
+	d, fits := signed(scale(whole, fraction, unit), neg)
 	if !fits {
 		return 0, strconv.ErrRange
 	}

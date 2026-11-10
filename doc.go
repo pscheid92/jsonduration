@@ -70,9 +70,8 @@
 // Its JSONPointer tells where in the input the duration is.
 // A format name that [Format.UnmarshalText] does not know is an error that lists the valid names.
 //
-// An invalid [Format] makes [With], [Marshalers], [Unmarshalers], [Format.Format], and [Format.Parse] panic,
-// also when it was passed to [AlsoAccept].
-// So does accepting two numeric formats, as in With(Sec, AlsoAccept(Nano)).
+// An invalid [Format] makes [With], [Marshalers], [Unmarshalers], [AlsoAccept], [Format.Format], and [Format.Parse]
+// panic. So does accepting two numeric formats, as in With(Sec, AlsoAccept(Nano)).
 // Only [Format.MarshalText] returns an error instead, as [encoding.TextMarshaler] requires.
 //
 // # Good to know

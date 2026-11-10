@@ -38,8 +38,10 @@ func TestInvalidFormatPanics(t *testing.T) {
 		{"Format", func() { bogus.Format(time.Second) }, "invalid format"},
 		{"Parse", func() { _, _ = bogus.Parse("1s") }, "invalid format"},
 		{"AlsoAccept invalid", func() { With(ISO8601, AlsoAccept(bogus)) }, "invalid format"},
+		{"AlsoAccept on its own", func() { AlsoAccept(Units, bogus) }, `invalid format "bogus"`},
 		{"AlsoAccept a second numeric", func() { With(Nano, AlsoAccept(Sec)) }, "both nano and sec"},
 		{"AlsoAccept two numeric", func() { Unmarshalers(ISO8601, AlsoAccept(Milli, Micro)) }, "both milli and micro"},
+		{"AlsoAccept in the other order", func() { With(ISO8601, AlsoAccept(Micro, Milli)) }, "both milli and micro"},
 	}
 
 	for _, tt := range tests {
@@ -52,6 +54,75 @@ func TestInvalidFormatPanics(t *testing.T) {
 			}()
 			tt.fn()
 		})
+	}
+}
+
+func TestRejectedDurationWrapsItsCause(t *testing.T) {
+	causes := map[string]error{
+		"ErrSyntax":        strconv.ErrSyntax,
+		"ErrRange":         strconv.ErrRange,
+		"ErrCalendarUnits": ErrCalendarUnits,
+		"ErrWrongType":     ErrWrongType,
+	}
+
+	tests := []struct {
+		format Format
+		in     string
+		want   string
+	}{
+		{Units, "1x", "ErrSyntax"},
+		{Units, "1", "ErrSyntax"},
+		{ISO8601, "PT1X", "ErrSyntax"},
+		{ISO8601, "P1D", "ErrCalendarUnits"},
+		{Nano, "99999999999999999999", "ErrRange"},
+	}
+
+	for _, tt := range tests {
+		_, err := tt.format.Parse(tt.in)
+		if !errors.Is(err, ErrInvalidDuration) {
+			t.Errorf("%s.Parse(%q): error %v does not match ErrInvalidDuration", tt.format, tt.in, err)
+		}
+
+		for name, cause := range causes {
+			if got, want := errors.Is(err, cause), name == tt.want; got != want {
+				t.Errorf("%s.Parse(%q): errors.Is(err, %s) = %v, want %v", tt.format, tt.in, name, got, want)
+			}
+		}
+	}
+
+	_, err := ISO8601.Parse("P1D")
+	if cause := errors.Unwrap(err); !errors.Is(cause, ErrCalendarUnits) || errors.Is(cause, ErrInvalidDuration) {
+		t.Errorf("errors.Unwrap(err) = %v, want the cause alone, ErrCalendarUnits", cause)
+	}
+}
+
+// The decoder hands out its own memory, which the next value overwrites. An error builds its message later,
+// so it must have kept the input by then.
+func TestRejectedDurationKeepsItsInput(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"5fortnights", `invalid duration "5fortnights" in format units: unknown unit "fortnights": invalid syntax`},
+		{
+			"5" + strings.Repeat("x", 100),
+			`invalid duration "5` + strings.Repeat("x", 63) + `"... in format units: ` +
+				`unknown unit "` + strings.Repeat("x", 64) + `"...: invalid syntax`,
+		},
+	}
+
+	for _, tt := range tests {
+		buf := []byte(tt.in)
+		_, cause := parseUnits(buf)
+		err := errInvalidDuration(buf, "units", cause)
+
+		for i := range buf {
+			buf[i] = '?'
+		}
+
+		if got := err.Error(); got != tt.want {
+			t.Errorf("message after the input changed = %s, want %s", got, tt.want)
+		}
 	}
 }
 

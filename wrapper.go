@@ -85,10 +85,10 @@ func (d *ISO8601Duration) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 
 // The decoders of the wrapper types, one per format.
 var (
-	decoderUnits   = newDecoder(Units, nil)
-	decoderSec     = newDecoder(Sec, nil)
-	decoderMilli   = newDecoder(Milli, nil)
-	decoderMicro   = newDecoder(Micro, nil)
-	decoderNano    = newDecoder(Nano, nil)
-	decoderISO8601 = newDecoder(ISO8601, nil)
+	decoderUnits   = newDecoder(Units, decodeConfig{})
+	decoderSec     = newDecoder(Sec, decodeConfig{})
+	decoderMilli   = newDecoder(Milli, decodeConfig{})
+	decoderMicro   = newDecoder(Micro, decodeConfig{})
+	decoderNano    = newDecoder(Nano, decodeConfig{})
+	decoderISO8601 = newDecoder(ISO8601, decodeConfig{})
 )

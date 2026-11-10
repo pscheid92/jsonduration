@@ -5,22 +5,15 @@ import (
 	"time"
 )
 
-// unitsCodec writes and reads format [Units], a JSON string such as "1h30m0.5s".
-type unitsCodec struct{}
-
-func (unitsCodec) numeric() bool {
-	return false
-}
-
-// appendTo writes d as [time.Duration.String] does, such as "1h30m0.5s".
-func (unitsCodec) appendTo(b []byte, d time.Duration) []byte {
+// appendUnits writes d in format [Units], as [time.Duration.String] does, such as "1h30m0.5s".
+func appendUnits(b []byte, d time.Duration) []byte {
 	return append(b, d.String()...)
 }
 
-// parse reads exactly what time.ParseDuration reads:
+// parseUnits reads format [Units], which is exactly what time.ParseDuration reads:
 // an optional sign and numbers with units, such as "1h30m" or "-1.5us", or "0".
 // Unlike time.ParseDuration, it computes fractions exactly, not through float64.
-func (unitsCodec) parse(b []byte) (time.Duration, error) {
+func parseUnits(b []byte) (time.Duration, error) {
 	s, neg := cutSign(b, true)
 	if string(s) == "0" {
 		return 0, nil

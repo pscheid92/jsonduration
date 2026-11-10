@@ -282,7 +282,7 @@ func newFormatPairs() []formatPair {
 					opts = append(opts, AcceptDays())
 				}
 
-				p := formatPair{name, first, second, acceptDays, newDecoder(first, opts)}
+				p := formatPair{name, first, second, acceptDays, newDecoder(first, configFrom(opts))}
 				pairs = append(pairs, p)
 			}
 		}
