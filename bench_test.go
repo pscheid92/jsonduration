@@ -77,24 +77,16 @@ func TestRejectedDurationAllocations(t *testing.T) {
 		}
 	}
 
-	// What encoding/json/v2 allocates for an error is its own business, so compare with an error of its own.
-	in := []byte(`{"D":"1h30m"}`)
-	opts := With(ISO8601)
+	// What encoding/json/v2 allocates around the error is its own business, and differs between platforms.
+	// So this measures the decoder alone, which builds the names of its formats once and not for every error.
+	for _, opts := range [][]DecodeOption{nil, {AlsoAccept(Nano, Units), AcceptDays()}} {
+		dc := newDecoder(ISO8601, configFrom(opts))
+		in := jsontext.Value(`"PT1X"`)
 
-	var d field[time.Duration]
-	ours := testing.AllocsPerRun(100, func() { err = json.Unmarshal(in, &d, opts) })
-	if !errors.Is(err, ErrInvalidDuration) {
-		t.Fatalf("Unmarshal error = %v, want one that matches ErrInvalidDuration", err)
-	}
-
-	var n field[int64]
-	theirs := testing.AllocsPerRun(100, func() { err = json.Unmarshal(in, &n) })
-	if err == nil {
-		t.Fatal("Unmarshal of a string into an int64 gave no error")
-	}
-
-	if ours-theirs != 2 {
-		t.Errorf("Unmarshal allocs = %v, want 2 more than the %v for an int64", ours, theirs)
+		allocs := testing.AllocsPerRun(100, func() { _, err = dc.parse(in, false) })
+		if allocs != 2 || !errors.Is(err, ErrInvalidDuration) {
+			t.Errorf("decoder in format %s: %v allocs with error %v, want 2 allocs and an error", dc.names, allocs, err)
+		}
 	}
 }
 
