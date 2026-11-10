@@ -263,3 +263,23 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+// TestFormatNumbers checks that number counts the formats in the order of Formats, and that numFormats is their count.
+func TestFormatNumbers(t *testing.T) {
+	formats := Formats()
+	if len(formats) != numFormats {
+		t.Errorf("numFormats = %d, want %d as Formats returns", numFormats, len(formats))
+	}
+
+	for i, f := range formats {
+		if got := int(f.number()); got != i+1 {
+			t.Errorf("%s.number() = %d, want %d", f, got, i+1)
+		}
+	}
+
+	for _, f := range []Format{"", "bogus", "ISO8601"} {
+		if got := f.number(); got != 0 {
+			t.Errorf("Format(%q).number() = %d, want 0", string(f), got)
+		}
+	}
+}

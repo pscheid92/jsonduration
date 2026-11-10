@@ -40,6 +40,9 @@ const (
 	ISO8601 Format = "iso8601"
 )
 
+// numFormats is the number of formats. TestFormatNumbers checks it.
+const numFormats = 6
+
 // Formats returns all formats, for example to list them in a flag's usage.
 func Formats() []Format {
 	return []Format{Units, Sec, Milli, Micro, Nano, ISO8601}
@@ -98,20 +101,60 @@ func (f *Format) UnmarshalText(b []byte) error {
 	return nil
 }
 
-// A codec writes and reads durations in one format, without JSON quotes.
-// Each format has its own codec type in its own file, and Format.codec maps a format to it.
-type codec interface {
-	// numeric reports whether the format writes a JSON number rather than a string.
-	numeric() bool
+// A codec writes and reads durations in one format, without JSON quotes. Format.codec maps a format to its codec.
+// Each kind of codec has its functions in its own file.
+//
+// It is a struct and not an interface, so that the compiler sees which function a call reaches:
+// through an interface, every buffer handed to a codec would move to the heap.
+type codec struct {
+	kind codecKind
 
-	// appendTo appends d to b.
-	appendTo(b []byte, d time.Duration) []byte
+	// unit is the length in nanoseconds of the unit that a decimal codec counts in.
+	unit uint64
 
-	// parse reads b.
-	// If b is not a duration in this format, it returns the cause:
-	// [strconv.ErrSyntax], [strconv.ErrRange], [ErrCalendarUnits], or an error that wraps one of them.
-	// errInvalidDuration turns the cause into the error a caller sees.
-	parse(b []byte) (time.Duration, error)
+	// acceptDays makes an ISO 8601 codec read a day as 24 hours and a week as 7 days, for decoding with AcceptDays.
+	acceptDays bool
+}
+
+// A codecKind tells the codecs apart that share no code.
+type codecKind uint8
+
+const (
+	unitsCodec codecKind = iota
+	decimalCodec
+	iso8601Codec
+)
+
+// numeric reports whether the format writes a JSON number rather than a string.
+func (c codec) numeric() bool {
+	return c.kind == decimalCodec
+}
+
+// appendTo appends d to b.
+func (c codec) appendTo(b []byte, d time.Duration) []byte {
+	switch c.kind {
+	case decimalCodec:
+		return appendDecimal(b, d, c.unit)
+	case iso8601Codec:
+		return appendISO8601(b, d)
+	default:
+		return appendUnits(b, d)
+	}
+}
+
+// parse reads b.
+// If b is not a duration in this format, it returns the cause:
+// [strconv.ErrSyntax], [strconv.ErrRange], [ErrCalendarUnits], or an error that wraps one of them.
+// errInvalidDuration turns the cause into the error a caller sees.
+func (c codec) parse(b []byte) (time.Duration, error) {
+	switch c.kind {
+	case decimalCodec:
+		return parseDecimal(b, c.unit)
+	case iso8601Codec:
+		return parseISO8601(b, c.acceptDays)
+	default:
+		return parseUnits(b)
+	}
 }
 
 // maxPossibleOutputLength is the length of the longest text any codec writes. TestLongestOutput checks it.
@@ -134,7 +177,45 @@ func (f Format) codec() (codec, bool) {
 		return codecISO8601, true
 	}
 
-	return nil, false
+	return codec{}, false
+}
+
+// number returns the place of f in [Formats], counted from one, and zero if f is not valid.
+func (f Format) number() uint8 {
+	switch f {
+	case Units:
+		return 1
+	case Sec:
+		return 2
+	case Milli:
+		return 3
+	case Micro:
+		return 4
+	case Nano:
+		return 5
+	case ISO8601:
+		return 6
+	}
+
+	return 0
+}
+
+// A formatSet holds formats as bits, so that a set fits into one byte and has one value whatever order it was built in.
+type formatSet uint8
+
+// bit returns the set of f alone, and the empty set if f is not valid.
+func (f Format) bit() formatSet {
+	number := f.number()
+	if number == 0 {
+		return 0
+	}
+
+	return 1 << (number - 1)
+}
+
+// has reports whether f is in the set.
+func (s formatSet) has(f Format) bool {
+	return s&f.bit() != 0
 }
 
 // mustCodec returns the codec of format f, and panics if f is not valid.
@@ -147,15 +228,15 @@ func (f Format) mustCodec() codec {
 	return c
 }
 
-// The codecs of the formats. They are values of the interface type, so that handing one out does not allocate.
+// The codecs of the formats.
 var (
-	codecUnits   codec = unitsCodec{}
-	codecSec     codec = decimalCodec{unit: uint64(time.Second)}
-	codecMilli   codec = decimalCodec{unit: uint64(time.Millisecond)}
-	codecMicro   codec = decimalCodec{unit: uint64(time.Microsecond)}
-	codecNano    codec = decimalCodec{unit: uint64(time.Nanosecond)}
-	codecISO8601 codec = iso8601Codec{}
+	codecUnits   = codec{kind: unitsCodec}
+	codecSec     = codec{kind: decimalCodec, unit: uint64(time.Second)}
+	codecMilli   = codec{kind: decimalCodec, unit: uint64(time.Millisecond)}
+	codecMicro   = codec{kind: decimalCodec, unit: uint64(time.Microsecond)}
+	codecNano    = codec{kind: decimalCodec, unit: uint64(time.Nanosecond)}
+	codecISO8601 = codec{kind: iso8601Codec}
 
 	// codecISO8601Days also reads days and weeks, for decoding with AcceptDays.
-	codecISO8601Days codec = iso8601Codec{acceptDays: true}
+	codecISO8601Days = codec{kind: iso8601Codec, acceptDays: true}
 )

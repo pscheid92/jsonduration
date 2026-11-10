@@ -33,14 +33,43 @@ var ErrWrongType = errors.New("wrong JSON type")
 // errInvalidDuration builds every error about a duration that could not be read:
 // text failed in formats, such as "iso8601" or "iso8601 or nano", because of cause.
 func errInvalidDuration(text []byte, formats string, cause error) error {
-	return fmt.Errorf("%w %s in format %s: %w", ErrInvalidDuration, quote(text), formats, cause)
+	return &durationError{input: excerptOf(text), formats: formats, cause: cause}
 }
 
-// quote quotes at most maxQuoted bytes of input, since an error message may go back to whoever sent the input.
+// A durationError is the error of [errInvalidDuration]. It matches [ErrInvalidDuration] and wraps its cause.
+// It builds its message when asked and not before, since many callers only want to know that the input was bad,
+// and building the message costs more than everything else about rejecting a duration.
+type durationError struct {
+	input   excerpt
+	formats string
+	cause   error
+}
+
+func (e *durationError) Error() string {
+	return ErrInvalidDuration.Error() + " " + e.input.quote() + " in format " + e.formats + ": " + e.cause.Error()
+}
+
+func (e *durationError) Is(target error) bool {
+	return target == ErrInvalidDuration
+}
+
+func (e *durationError) Unwrap() error {
+	return e.cause
+}
+
+// An excerpt is as much of a bad input as an error quotes: at most maxQuoted bytes,
+// since an error message may go back to whoever sent the input.
+type excerpt struct {
+	text string
+	// cut reports that the input was longer than text.
+	cut bool
+}
+
+// excerptOf copies the excerpt out of input, which may be memory that the caller uses again.
 // It does not cut a UTF-8 character in two, which would show as a replacement character that the input never held.
-func quote(input []byte) string {
+func excerptOf(input []byte) excerpt {
 	if len(input) <= maxQuoted {
-		return strconv.Quote(string(input))
+		return excerpt{text: string(input)}
 	}
 
 	// A character has at most utf8.UTFMax bytes, so the one around the cut starts at most utf8.UTFMax-1 bytes
@@ -53,7 +82,21 @@ func quote(input []byte) string {
 		}
 	}
 
-	return strconv.Quote(string(input[:cut])) + "..."
+	return excerpt{text: string(input[:cut]), cut: true}
+}
+
+// quote returns the excerpt in quotes, followed by "..." if the input was longer.
+func (e excerpt) quote() string {
+	if e.cut {
+		return strconv.Quote(e.text) + "..."
+	}
+
+	return strconv.Quote(e.text)
+}
+
+// quote quotes at most maxQuoted bytes of input.
+func quote(input []byte) string {
+	return excerptOf(input).quote()
 }
 
 // maxQuoted is how many bytes of a bad input an error quotes, far more than any valid duration or format name has.
@@ -64,7 +107,21 @@ var errMissingUnit = fmt.Errorf("missing unit: %w", strconv.ErrSyntax)
 
 // errUnknownUnit is the cause for a unit that format Units does not know, such as "x" in "1x".
 func errUnknownUnit(name []byte) error {
-	return fmt.Errorf("unknown unit %s: %w", quote(name), strconv.ErrSyntax)
+	return &unknownUnitError{name: excerptOf(name)}
+}
+
+// An unknownUnitError is the error of [errUnknownUnit]. It wraps [strconv.ErrSyntax], and like a durationError
+// it builds its message when asked.
+type unknownUnitError struct {
+	name excerpt
+}
+
+func (e *unknownUnitError) Error() string {
+	return "unknown unit " + e.name.quote() + ": " + strconv.ErrSyntax.Error()
+}
+
+func (e *unknownUnitError) Unwrap() error {
+	return strconv.ErrSyntax
 }
 
 // A wrongKindError is the cause for a JSON value of a kind that no accepted format reads, such as a number for

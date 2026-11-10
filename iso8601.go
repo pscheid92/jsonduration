@@ -7,19 +7,9 @@ import (
 	"time"
 )
 
-// iso8601Codec writes and reads format [ISO8601], a JSON string such as "PT1H30M0.5S".
-// With acceptDays, set by [AcceptDays] when decoding, a day counts as 24 hours and a week as 7 days.
-type iso8601Codec struct {
-	acceptDays bool
-}
-
-func (iso8601Codec) numeric() bool {
-	return false
-}
-
-// appendTo writes d in hours, minutes, and seconds, leaving out those that are zero, such as "PT1H30M0.5S" or "-PT1M",
-// and "PT0S" for zero.
-func (iso8601Codec) appendTo(b []byte, d time.Duration) []byte {
+// appendISO8601 writes d in format [ISO8601]: in hours, minutes, and seconds, leaving out those that are zero,
+// such as "PT1H30M0.5S" or "-PT1M", and "PT0S" for zero.
+func appendISO8601(b []byte, d time.Duration) []byte {
 	if d == 0 {
 		return append(b, "PT0S"...)
 	}
@@ -47,17 +37,17 @@ func (iso8601Codec) appendTo(b []byte, d time.Duration) []byte {
 	return b
 }
 
-// parse reads the restricted ISO 8601 profile of encoding/json/v2:
+// parseISO8601 reads format [ISO8601], the restricted ISO 8601 profile of encoding/json/v2:
 // an optional sign, "P", the date components, and then "T" and the clock components, in either case.
 // Only the last component may have a fraction, after "."
 // or ",", and of the accepted units only hours, minutes, and seconds can have one.
 //
-// With acceptDays, days and weeks count as 24 hours and 7 days.
+// With acceptDays, set by [AcceptDays] when decoding, a day counts as 24 hours and a week as 7 days.
 //
 // Unlike encoding/json/v2, it rejects calendar units outright, except for a count of zero as in "P0D",
 // computes fractions of hours and minutes exactly instead of through float64,
 // and rejects a fraction that is not all digits, as in "PT1.e5H".
-func (iso iso8601Codec) parse(b []byte) (time.Duration, error) {
+func parseISO8601(b []byte, acceptDays bool) (time.Duration, error) {
 	s, neg := cutSign(b, true)
 
 	if len(s) == 0 || s[0] != 'P' && s[0] != 'p' {
@@ -69,7 +59,7 @@ func (iso iso8601Codec) parse(b []byte) (time.Duration, error) {
 		return 0, strconv.ErrSyntax
 	}
 
-	sum := isoSum{acceptDays: iso.acceptDays}
+	sum := isoSum{acceptDays: acceptDays}
 	var ok bool
 	for _, c := range isoDate {
 		if date, ok = sum.take(date, c); !ok {

@@ -408,6 +408,18 @@ func TestAlsoAccept(t *testing.T) {
 		}
 	})
 
+	t.Run("names the formats in the same order whatever the order of the arguments", func(t *testing.T) {
+		for _, accept := range []DecodeOption{AlsoAccept(Nano, Units), AlsoAccept(Units, Nano)} {
+			var d time.Duration
+			err := json.Unmarshal([]byte(`"x"`), &d, With(ISO8601, accept))
+
+			const want = "in format iso8601 or units or nano"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("Unmarshal error = %v, want one containing %q", err, want)
+			}
+		}
+	})
+
 	t.Run("keeps the formats after a duplicate", func(t *testing.T) {
 		withDuplicate := With(ISO8601, AlsoAccept(ISO8601, Units))
 

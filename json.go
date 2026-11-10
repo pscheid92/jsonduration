@@ -3,21 +3,21 @@ package jsonduration
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"reflect"
-	"slices"
 	"time"
 )
 
 // With returns options that make encoding/json/v2 write and read every [time.Duration] in format f:
 // in struct fields, pointers, slices, arrays, map keys and values, and, when marshaling, in values held in an any.
-// It panics if a format is not valid or two numeric formats are accepted.
+// It panics if f is not valid or two numeric formats are accepted.
 //
 // Decoding is strict.
 // It accepts only f, unless [AlsoAccept] adds formats,
 // and reads a numeric format from a JSON string only where it is written as one:
 // in object names and with json.StringifyNumbers. JSON null sets the duration to zero.
 //
-// The options are safe for concurrent use, so create them once and share them:
+// The options are safe for concurrent use.
+// With builds them on the first call and returns the same ones for the same arguments afterwards,
+// so a call costs a lookup and no allocation, and it makes no difference whether you keep the options or ask again:
 //
 //	var jsonOpts = jsonduration.With(jsonduration.ISO8601)
 //
@@ -26,33 +26,27 @@ import (
 //
 // To combine them with your own marshalers or unmarshalers, use [Marshalers] and [Unmarshalers].
 func With(f Format, opts ...DecodeOption) json.Options {
-	marshalers := json.WithMarshalers(Marshalers(f))
-	unmarshalers := json.WithUnmarshalers(Unmarshalers(f, opts...))
-	return json.JoinOptions(marshalers, unmarshalers)
+	return sharedFor(f, opts).options
 }
 
 // Marshalers returns the writing half of [With], to join with your own marshalers through json.JoinMarshalers:
 // a second json.WithMarshalers option would replace the first. It panics if f is not valid.
 func Marshalers(f Format) *json.Marshalers {
-	c := f.mustCodec()
-	return json.MarshalToFunc(func(enc *jsontext.Encoder, d time.Duration) error {
-		return encode(enc, c, d)
-	})
+	return sharedFor(f, nil).marshalers
 }
 
 // Unmarshalers returns the reading half of [With], to join with your own unmarshalers through json.JoinUnmarshalers:
 // a second json.WithUnmarshalers option would replace the first. It panics as [With] does.
 func Unmarshalers(f Format, opts ...DecodeOption) *json.Unmarshalers {
-	dc := newDecoder(f, opts)
-	dc.goType = reflect.TypeFor[time.Duration]()
-
-	return json.UnmarshalFromFunc(dc.decode)
+	return sharedFor(f, opts).unmarshalers
 }
 
 // A DecodeOption changes how [With] and [Unmarshalers] read durations:
 // [AlsoAccept] adds formats, and [AcceptDays] reads ISO 8601 days. Writing always uses the one format given.
 type DecodeOption interface {
-	apply(*decodeConfig)
+	// apply returns the configuration with the option applied.
+	// It takes a value, not a pointer, so that the configuration of a call can stay on the stack.
+	apply(decodeConfig) decodeConfig
 }
 
 // AlsoAccept makes decoding accept the given formats besides the one that is written,
@@ -65,9 +59,19 @@ type DecodeOption interface {
 // a JSON number such as 90 could be seconds or nanoseconds, so at most one numeric format may be accepted.
 //
 // Accept only the formats you need, since data that two systems read differently is a common source of security bugs.
+//
+// The order of the formats makes no difference. AlsoAccept panics if a format is not valid.
 func AlsoAccept(formats ...Format) DecodeOption {
-	// A copy, so that the option stays the same when the caller changes the slice it passed.
-	accepted := slices.Clone(formats)
+	var accepted formatSet
+	for _, f := range formats {
+		bit := f.bit()
+		if bit == 0 {
+			panic(errInvalidFormat(f))
+		}
+
+		accepted |= bit
+	}
+
 	return alsoAccept(accepted)
 }
 
@@ -82,8 +86,9 @@ func AcceptDays() DecodeOption {
 	return acceptDays{}
 }
 
+// decodeConfig is what the options of a call add up to.
 type decodeConfig struct {
-	alsoAccept []Format
+	accepted   formatSet
 	acceptDays bool
 }
 
@@ -92,28 +97,31 @@ func configFrom(opts []DecodeOption) decodeConfig {
 	var config decodeConfig
 	for _, opt := range opts {
 		if opt != nil {
-			opt.apply(&config)
+			config = opt.apply(config)
 		}
 	}
 
 	return config
 }
 
-type alsoAccept []Format
+// alsoAccept is the option of [AlsoAccept]. It is one byte, which Go puts into an interface without allocating.
+type alsoAccept formatSet
 
-func (a alsoAccept) apply(c *decodeConfig) {
-	c.alsoAccept = append(c.alsoAccept, a...)
+func (a alsoAccept) apply(c decodeConfig) decodeConfig {
+	c.accepted |= formatSet(a)
+	return c
 }
 
 type acceptDays struct{}
 
-func (acceptDays) apply(c *decodeConfig) {
+func (acceptDays) apply(c decodeConfig) decodeConfig {
 	c.acceptDays = true
+	return c
 }
 
 // encode writes d with codec c:
 // as a JSON number for a numeric format, unless the position or the options call for a JSON string.
-// It writes into the encoder's own buffer, since one on the stack would escape through the codec interface.
+// It writes into the encoder's own buffer, which the encoder hands out for this.
 func encode(enc *jsontext.Encoder, c codec, d time.Duration) error {
 	quoted := !c.numeric() || numbersQuoted(enc)
 	b := enc.AvailableBuffer()

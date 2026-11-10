@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strconv"
 	"time"
 )
@@ -15,29 +14,32 @@ import (
 // decoder reads a duration in any of its formats, the written one first.
 // codecs holds the codec of each format, set up for the decoding options.
 type decoder struct {
-	formats    []Format
 	codecs     []codec
 	hasNumeric bool
+
+	// names lists the formats for error messages, such as "iso8601 or nano".
+	names string
 
 	// goType is the Go type that errors name. If it is nil, encoding/json/v2 names the type it decodes into:
 	// the wrapper type for a wrapper type, but *time.Duration for Unmarshalers.
 	goType reflect.Type
 }
 
-// newDecoder applies the options and checks the formats.
-// It leaves out duplicates and panics on an invalid format or a second numeric one.
-func newDecoder(f Format, opts []DecodeOption) *decoder {
-	config := configFrom(opts)
-	formats := append([]Format{f}, config.alsoAccept...)
+// newDecoder returns the decoder for format f and the options of a call:
+// it reads f first and then the other accepted formats, in the order of [Formats].
+// It panics if f is not valid or a second numeric format is accepted.
+func newDecoder(f Format, config decodeConfig) *decoder {
+	formats := []Format{f}
+	for _, g := range Formats() {
+		if g != f && config.accepted.has(g) {
+			formats = append(formats, g)
+		}
+	}
 
 	dc := &decoder{}
 	var numeric Format
 	for _, g := range formats {
 		c := g.mustCodec()
-		if slices.Contains(dc.formats, g) {
-			continue
-		}
-
 		if c.numeric() {
 			if numeric != "" {
 				panic(errAmbiguousNumeric(numeric, g))
@@ -50,11 +52,11 @@ func newDecoder(f Format, opts []DecodeOption) *decoder {
 			c = codecISO8601Days
 		}
 
-		dc.formats = append(dc.formats, g)
 		dc.codecs = append(dc.codecs, c)
 	}
 
 	dc.hasNumeric = numeric != ""
+	dc.names = joinNames(formats, " or ")
 	return dc
 }
 
@@ -90,7 +92,7 @@ func (dc *decoder) decode(dec *jsontext.Decoder, d *time.Duration) error {
 func (dc *decoder) parse(val jsontext.Value, quoted bool) (time.Duration, error) {
 	text, err := unquote(val)
 	if err != nil {
-		return 0, errInvalidDuration(text, dc.names(), err)
+		return 0, errInvalidDuration(text, dc.names, err)
 	}
 
 	var reported error
@@ -113,7 +115,7 @@ func (dc *decoder) parse(val jsontext.Value, quoted bool) (time.Duration, error)
 		reported = dc.wrongKind(quoted)
 	}
 
-	return 0, errInvalidDuration(text, dc.names(), reported)
+	return 0, errInvalidDuration(text, dc.names, reported)
 }
 
 // unquote returns the text of a JSON string without its quotes, or val itself for other kinds.
@@ -165,9 +167,4 @@ func (dc *decoder) wrongKind(quoted bool) error {
 	}
 
 	return wrongKindError{want}
-}
-
-// names returns the formats for error messages, such as "iso8601 or nano".
-func (dc *decoder) names() string {
-	return joinNames(dc.formats, " or ")
 }
