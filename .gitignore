@@ -1,0 +1,13 @@
+# Editors and tools
+.idea/
+.vscode/
+.claude/
+.DS_Store
+
+# Test output
+*.test
+*.out
+*.prof
+coverage.*
+
+# testdata/fuzz is not ignored: failing fuzz inputs land there and stay as regression tests.

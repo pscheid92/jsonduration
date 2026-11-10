@@ -1,0 +1,49 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - asciicheck
+    - bidichk
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errname
+    - errorlint
+    - gocritic
+    - godoclint
+    - godot
+    - goprintffuncname
+    - gosec
+    - intrange
+    - lll
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - wastedassign
+
+  exclusions:
+    rules:
+      # Tests use a seeded math/rand for reproducible inputs and convert freely between integer types.
+      - path: _test\.go
+        linters: [gosec]
+        text: "G115|G404"
+
+  settings:
+    lll:
+      line-length: 120
+      tab-width: 4
+    godot:
+      scope: toplevel
+    nakedret:
+      max-func-lines: 0
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style

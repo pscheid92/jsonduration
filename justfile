@@ -1,0 +1,83 @@
+# Every fuzz target of the module a recipe runs in, asked from the tests themselves, so that a new target cannot be
+# forgotten. The shell of the recipe runs the command.
+all_fuzz_targets := "$(go test -list '^Fuzz' . | grep '^Fuzz')"
+mutation_threshold := "100"
+
+default:
+    just --list
+
+test:
+    go test -race -count=1 ./...
+
+# Run the tests as a 32-bit program, without -race, which 386 lacks. Linux only: macOS cannot run 32-bit programs.
+test-32bit:
+    GOARCH=386 go test -count=1 ./...
+
+vet:
+    go vet ./...
+
+# Both modules: internal/compat is one of its own, which `./...` does not reach.
+lint:
+    golangci-lint run ./...
+    cd internal/compat && golangci-lint run ./...
+
+# Format all Go files in place.
+fmt:
+    gofmt -w .
+
+# Apply the Go toolchain's automated fixes and modernizers.
+fix:
+    go fix ./...
+
+# Fail when go fix, gofmt, or go mod tidy would change something; used by check and CI.
+fix-check:
+    go fix -diff ./...
+    @test -z "$(gofmt -l .)" || { gofmt -d .; exit 1; }
+    go mod tidy -diff
+
+coverage:
+    go test -count=1 -coverprofile=coverage.out ./...
+    go tool cover -func=coverage.out
+
+# Lint the GitHub workflows, with shellcheck on their scripts where it is installed.
+actionlint:
+    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+# Enables every kind of change that gremlins knows, and fails unless at least `threshold` percent of the covered changes
+# make a test fail. Every change so far has, but a new one may not be able to, since it may not change what the code
+# does: then check it, and lower the threshold only if no test can tell. The version is pinned, because a new one can
+# bring new kinds of change. Gremlins reports changes to constants and to case expressions as not covered, because
+# `go test -cover` counts neither; the tests check them all the same.
+#
+# Mutation testing: change the code in small ways, one at a time, and check that a test fails for each change.
+mutate threshold=mutation_threshold:
+    go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
+        --invert-logical --invert-loopctrl --invert-assignments --invert-bitwise --invert-bwassign \
+        --remove-self-assignments --threshold-efficacy {{ threshold }}
+
+# Scan for known vulnerabilities in the code that is actually reached.
+vuln:
+    go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+# Fuzz every target for a while, or some, as in `just fuzz 2m FuzzParse`.
+fuzz time="30s" *targets=all_fuzz_targets:
+    for t in {{ targets }}; do go test -run='^$' -fuzz="^$t\$" -fuzztime={{ time }} . || exit 1; done
+
+# Compare with the removed `format` tag option. internal/compat is a module of its own, since it needs
+# github.com/go-json-experiment/json to turn the option on, and the library itself has no dependencies.
+[working-directory: 'internal/compat']
+compat:
+    go fix -diff ./...
+    go mod tidy -diff
+    go vet ./...
+    go test -race -count=1 ./...
+
+# Fuzz the comparison with the `format` tag option, as `just fuzz` does the library.
+[working-directory: 'internal/compat']
+compat-fuzz time="30s" *targets=all_fuzz_targets:
+    for t in {{ targets }}; do go test -run='^$' -fuzz="^$t\$" -fuzztime={{ time }} . || exit 1; done
+
+bench:
+    go test -run='^$' -bench=. -benchmem ./...
+
+check: fix-check vet lint actionlint test compat vuln
