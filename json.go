@@ -3,6 +3,7 @@ package jsonduration
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"slices"
 	"time"
 )
 
@@ -16,10 +17,11 @@ import (
 // in object names and with json.StringifyNumbers. JSON null sets the duration to zero.
 //
 // The options are safe for concurrent use.
-// With builds them on the first call and returns the same ones for the same arguments afterwards,
-// so a call costs a lookup and no allocation, and it makes no difference whether you keep the options or ask again:
+// Without decoding options, With returns the same ones on every call and allocates nothing,
+// so it makes no difference whether you keep them or ask again. With decoding options it builds new ones,
+// so keep those:
 //
-//	var jsonOpts = jsonduration.With(jsonduration.ISO8601)
+//	var jsonOpts = jsonduration.With(jsonduration.ISO8601, jsonduration.AlsoAccept(jsonduration.Nano))
 //
 //	b, err := json.Marshal(v, jsonOpts)
 //	err = json.Unmarshal(b, &v, jsonOpts)
@@ -45,7 +47,6 @@ func Unmarshalers(f Format, opts ...DecodeOption) *json.Unmarshalers {
 // [AlsoAccept] adds formats, and [AcceptDays] reads ISO 8601 days. Writing always uses the one format given.
 type DecodeOption interface {
 	// apply returns the configuration with the option applied.
-	// It takes a value, not a pointer, so that the configuration of a call can stay on the stack.
 	apply(decodeConfig) decodeConfig
 }
 
@@ -62,17 +63,14 @@ type DecodeOption interface {
 //
 // The order of the formats makes no difference. AlsoAccept panics if a format is not valid.
 func AlsoAccept(formats ...Format) DecodeOption {
-	var accepted formatSet
 	for _, f := range formats {
-		bit := f.bit()
-		if bit == 0 {
+		if !f.Valid() {
 			panic(errInvalidFormat(f))
 		}
-
-		accepted |= bit
 	}
 
-	return alsoAccept(accepted)
+	// A copy, so that the option does not change if the caller changes the slice afterwards.
+	return alsoAccept(slices.Clone(formats))
 }
 
 // AcceptDays makes [ISO8601] decoding read a day as exactly 24 hours and a week as 7 days: "P1DT12H" is 36h.
@@ -86,9 +84,9 @@ func AcceptDays() DecodeOption {
 	return acceptDays{}
 }
 
-// decodeConfig is what the options of a call add up to.
+// decodeConfig is what the options of a call add up to. accepted may name a format more than once, in any order.
 type decodeConfig struct {
-	accepted   formatSet
+	accepted   []Format
 	acceptDays bool
 }
 
@@ -104,11 +102,11 @@ func configFrom(opts []DecodeOption) decodeConfig {
 	return config
 }
 
-// alsoAccept is the option of [AlsoAccept]. It is one byte, which Go puts into an interface without allocating.
-type alsoAccept formatSet
+// alsoAccept is the option of [AlsoAccept].
+type alsoAccept []Format
 
 func (a alsoAccept) apply(c decodeConfig) decodeConfig {
-	c.accepted |= formatSet(a)
+	c.accepted = append(c.accepted, a...)
 	return c
 }
 

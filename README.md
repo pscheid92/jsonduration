@@ -2,8 +2,6 @@
 
 [![CI](https://github.com/pscheid92/jsonduration/actions/workflows/ci.yml/badge.svg)](https://github.com/pscheid92/jsonduration/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/pscheid92/jsonduration.svg)](https://pkg.go.dev/github.com/pscheid92/jsonduration)
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fpscheid92%2Fjsonduration%2Fbadges%2Fcoverage.json)](https://github.com/pscheid92/jsonduration/actions/workflows/ci.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/pscheid92/jsonduration/badge)](https://scorecard.dev/viewer/?uri=github.com/pscheid92/jsonduration)
 
 JSON formats for `time.Duration` in Go's `encoding/json/v2`.
 
@@ -55,8 +53,9 @@ func main() {
 }
 ```
 
-`encoding/json/v2` is part of the standard library since Go 1.27, with no `GOEXPERIMENT` setting. `With` builds the
-options on the first call and returns the same ones afterwards, so a later call costs a lookup and no allocation.
+`encoding/json/v2` is part of the standard library since Go 1.27, with no `GOEXPERIMENT` setting. Without decoding
+options, `With` returns the same options on every call and allocates nothing. With `AlsoAccept` or `AcceptDays` it
+builds new ones, so keep those in a variable.
 
 If you already pass `json.WithMarshalers` or `json.WithUnmarshalers`, don't add `With` next to them: a second
 `WithMarshalers` option replaces the first, without an error. Join yours with the package's instead:
@@ -208,7 +207,9 @@ flag.Parse()
 opts := jsonduration.With(format)
 ```
 
-`With` panics on an invalid `Format`, which includes the empty one. Check a `Format` from a plain string first:
+A `Format` is its name, which is what lets a flag or a configuration hold one. So a `Format` that names nothing can
+exist, like `time.Month(13)`, and using it is a programming error: `With` panics on an invalid `Format`, which
+includes the empty one. Check a `Format` from a plain string first:
 
 ```go
 format := jsonduration.Format(os.Getenv("DURATION_FORMAT"))
@@ -233,12 +234,13 @@ d, err := jsonduration.Sec.Parse("5400.5")    // 1h30m0.5s
 - To leave out zero durations, use `omitzero`. In v2, `omitempty` keeps them.
 - Decoding checks the format, not the value: `"-1s"` and `"0s"` are read. Check ranges after decoding.
 - Numeric formats reject exponents, as in `1e-05`, which some encoders such as Swift's write for small numbers.
+  That is on purpose: decoding is strict, and exponents would add a second spelling of every number for a rare case.
 - Digits below a nanosecond are truncated, not rounded. No format rounds to whole units: `Milli` writes `1.234567`.
 - The largest duration is about 292 years, `PT2562047H47M16.854775807S`; anything larger is `strconv.ErrRange`.
 - `ISO8601` takes one sign, `-` or `+`, only in front, as in `-PT30S`. It rejects Java's negative durations, such as
-  `PT-30S`. It reads designators in either case and a decimal comma, so `pt1,5s` is 1.5s. A count of zero must have
-  no fraction: `"P0D"` is read, `"P0.0D"` is not. Output is always the shortest form, so `"P0DT2H"` comes back as
-  `"PT2H"`.
+  `PT-30S`, as the `format` tag of `encoding/json/v2` did. It reads designators in either case and a decimal comma,
+  so `pt1,5s` is 1.5s. A count of zero must have no fraction: `"P0D"` is read, `"P0.0D"` is not. Output is always the
+  shortest form, so `"P0DT2H"` comes back as `"PT2H"`.
 - `Units` reads what `time.ParseDuration` reads. So it reads protobuf's `"3600s"` but writes `"1h0m0s"`, and it does
   not read Rust humantime's `"1h 30m"` or PostgreSQL's `"01:30:00"`. PostgreSQL writes ISO 8601 with
   `intervalstyle = iso_8601`.
@@ -263,9 +265,8 @@ them. [TESTING.md](TESTING.md) has the details.
 ## How fast it is
 
 jsonduration allocates nothing of its own: writing and reading a duration allocates what an `int64` in the same place
-does. A duration in a struct field takes about 50 ns more to write and 60 to 100 ns more to read than an `int64`, on
-an Apple M2. `With` takes 5 ns, so there is no need to keep what it returns. In a struct with many fields, wrapper
-types are faster than options. [BENCHMARKS.md](BENCHMARKS.md) has the numbers and what they are compared with.
+does, and `With` without decoding options allocates nothing. Tests enforce both. In a struct with many fields,
+wrapper types are faster than options. [BENCHMARKS.md](BENCHMARKS.md) has rough timings and the reasons.
 
 ## Development
 

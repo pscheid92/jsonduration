@@ -5,7 +5,8 @@ import "time"
 // Format is a way to write a [time.Duration] in JSON, such as [ISO8601] for "PT1H30M".
 // Use it with [With], or convert single durations with [Format.Format] and [Format.Parse].
 //
-// A flag ([flag.TextVar]) or a JSON configuration can name a format, and both reject unknown names.
+// A Format is its name, so that a flag ([flag.TextVar]) or a JSON configuration can hold one, and both reject unknown
+// names. As with time.Month(13), a value that names no format can therefore exist, and using it is a programming error:
 // [With] panics on an invalid Format, such as the empty one that decoding leaves for a missing name or null,
 // so give it a default, as in cmp.Or(cfg.DurationFormat, jsonduration.ISO8601).
 // A Format converted from a string, as in Format(os.Getenv("DURATION_FORMAT")), is not checked,
@@ -39,9 +40,6 @@ const (
 	// are rejected.
 	ISO8601 Format = "iso8601"
 )
-
-// numFormats is the number of formats. TestFormatNumbers checks it.
-const numFormats = 6
 
 // Formats returns all formats, for example to list them in a flag's usage.
 func Formats() []Format {
@@ -178,44 +176,6 @@ func (f Format) codec() (codec, bool) {
 	}
 
 	return codec{}, false
-}
-
-// number returns the place of f in [Formats], counted from one, and zero if f is not valid.
-func (f Format) number() uint8 {
-	switch f {
-	case Units:
-		return 1
-	case Sec:
-		return 2
-	case Milli:
-		return 3
-	case Micro:
-		return 4
-	case Nano:
-		return 5
-	case ISO8601:
-		return 6
-	}
-
-	return 0
-}
-
-// A formatSet holds formats as bits, so that a set fits into one byte and has one value whatever order it was built in.
-type formatSet uint8
-
-// bit returns the set of f alone, and the empty set if f is not valid.
-func (f Format) bit() formatSet {
-	number := f.number()
-	if number == 0 {
-		return 0
-	}
-
-	return 1 << (number - 1)
-}
-
-// has reports whether f is in the set.
-func (s formatSet) has(f Format) bool {
-	return s&f.bit() != 0
 }
 
 // mustCodec returns the codec of format f, and panics if f is not valid.

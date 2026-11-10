@@ -33,6 +33,8 @@ func TestInvalidFormatPanics(t *testing.T) {
 		want string
 	}{
 		{"With", func() { With(bogus) }, "invalid format"},
+		{"With the empty format", func() { With("") }, `invalid format ""`},
+		{"With an invalid format after a valid option", func() { With(bogus, AlsoAccept(Nano)) }, "invalid format"},
 		{"Marshalers", func() { Marshalers(bogus) }, "invalid format"},
 		{"Unmarshalers", func() { Unmarshalers(bogus) }, "invalid format"},
 		{"Format", func() { bogus.Format(time.Second) }, "invalid format"},

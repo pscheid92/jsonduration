@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -31,7 +32,7 @@ type decoder struct {
 func newDecoder(f Format, config decodeConfig) *decoder {
 	formats := []Format{f}
 	for _, g := range Formats() {
-		if g != f && config.accepted.has(g) {
+		if g != f && slices.Contains(config.accepted, g) {
 			formats = append(formats, g)
 		}
 	}

@@ -93,34 +93,13 @@ jobs:
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       - run: just test-32bit
 
-  # Asks the tests of both modules for their fuzz targets, so that the fuzz job cannot miss a new one.
-  fuzz-targets:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      matrix: ${{ steps.list.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-      - id: list
-        run: |
-          matrix=$(just fuzz-matrix)
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-
+  # Every fuzz target of both modules, one after the other. The recipes ask the tests for their targets, so a new one
+  # cannot be missed. A target runs for 45 seconds on a push and for 10 minutes at night.
   fuzz:
-    needs: fuzz-targets
-    name: fuzz (${{ matrix.target }}, ${{ matrix.recipe }})
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.fuzz-targets.outputs.matrix) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
+    env:
+      FUZZTIME: ${{ github.event_name == 'schedule' && '10m' || '45s' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -135,23 +114,19 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build/fuzz
-          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
-          restore-keys: fuzz-${{ matrix.target }}-
-      - run: just "$RECIPE" "$FUZZTIME" "$TARGET"
-        env:
-          RECIPE: ${{ matrix.recipe }}
-          TARGET: ${{ matrix.target }}
-          FUZZTIME: ${{ github.event_name == 'schedule' && '10m' || '45s' }}
+          key: fuzz-${{ github.run_id }}
+          restore-keys: fuzz-
+      - run: just fuzz "$FUZZTIME"
+      - run: just compat-fuzz "$FUZZTIME"
       - name: Upload the failing input
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: fuzz-${{ matrix.target }}
+          name: fuzz-failing-input
           path: |
             testdata/fuzz
             internal/compat/testdata/fuzz
 
-  # Too slow for every push: every change to the code runs the tests again.
   mutation:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -177,41 +152,3 @@ jobs:
           go-version-input: stable
           check-latest: true
           cache: false
-
-  # Publishes the measured coverage for the README badge, also when it drops below 100%, as a shields.io endpoint file
-  # on the badges branch.
-  coverage-badge:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write # push the badges branch
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-      - run: just coverage
-      - name: Publish the badge
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          total=$(go tool cover -func=coverage.out | awk '/^total:/ { print $3 }')
-          color=$(awk -v t="${total%\%}" 'BEGIN {
-            print (t >= 100 ? "brightgreen" : t >= 90 ? "green" : t >= 75 ? "yellow" : "red")
-          }')
-          mkdir "$RUNNER_TEMP/badges"
-          cd "$RUNNER_TEMP/badges"
-          printf '{"schemaVersion":1,"label":"coverage","message":"%s","color":"%s"}\n' "$total" "$color" \
-            > coverage.json
-          # One fresh commit each time, force-pushed, so the branch never grows.
-          git init -q -b badges
-          git add coverage.json
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -q -m "Coverage ${total} at ${GITHUB_SHA::7}"
-          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
-          echo "### Coverage badge: ${total}" >> "$GITHUB_STEP_SUMMARY"

@@ -77,14 +77,6 @@ compat:
 compat-fuzz time="30s" *targets=all_fuzz_targets:
     for t in {{ targets }}; do go test -run='^$' -fuzz="^$t\$" -fuzztime={{ time }} . || exit 1; done
 
-# The fuzz targets of both modules as a matrix for GitHub Actions: CI's fuzz job runs whatever this prints.
-fuzz-matrix:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    list() { go test -list '^Fuzz' . | grep '^Fuzz' | sed "s/$/ $1/"; }
-    { list fuzz; cd internal/compat; list compat-fuzz; } |
-        jq -R -c -s 'split("\n") | map(select(. != "") | split(" ") | {target: .[0], recipe: .[1]}) | {include: .}'
-
 bench:
     go test -run='^$' -bench=. -benchmem ./...
 
