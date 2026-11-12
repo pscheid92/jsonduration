@@ -136,7 +136,7 @@ func FuzzUnmarshalMatchesFormatTag(f *testing.F) {
 	seeds := []string{
 		`"1h30m"`, `"-1.5s"`, `"+.5h"`, `"1.s"`, `"PT1H30M"`, `"-PT0.5S"`, `"PT0.99999999999999999999H"`, `"PT1.e5H"`,
 		`"P1D"`, `"P1Y2M"`, `1.5`, `-0`, `-0.0000000001`, `9223372036.854775807`, `"1.5"`, `null`, `true`, `1e3`,
-		`".9007199279999999s"`, `"P0D"`, `"P0Y0M0DT1H30M0S"`, `"P0Y1D"`,
+		`".9007199279999999s"`, `"P0D"`, `"P0Y0M0DT1H30M0S"`, `"P0Y1D"`, `"-PT0,0000000000002H"`,
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -190,13 +190,23 @@ func intendedDifference(f jsonduration.Format, value string, want time.Duration,
 		return negativeZero.MatchString(value)
 	case f == jsonduration.ISO8601 && wantErr == nil && errors.Is(err, strconv.ErrSyntax):
 		return fractionStartingWithE.MatchString(value)
-	case f == jsonduration.ISO8601 && wantErr == nil && err == nil && want-got == 1:
+	case f == jsonduration.ISO8601 && wantErr == nil && err == nil && oneFurtherFromZero(want, got):
 		return fractionOfHoursOrMinutes.MatchString(value)
 	case f == jsonduration.ISO8601 && wantErr != nil && err == nil:
 		return onlyZeroCalendarUnits.MatchString(value)
 	}
 
 	return false
+}
+
+// oneFurtherFromZero reports whether want is a nanosecond further from zero than got, on the same side of it:
+// where the tag option rounds a fraction up and jsonduration truncates it, for a negative duration as for a positive.
+func oneFurtherFromZero(want, got time.Duration) bool {
+	if want < 0 {
+		return got-want == 1
+	}
+
+	return want-got == 1
 }
 
 // roundsFractionsThroughFloat reports whether the results for Units differ only as far as time.ParseDuration, which
@@ -266,6 +276,10 @@ func TestDifferencesFromFormatTag(t *testing.T) {
 		{
 			jsonduration.ISO8601, `"PT0.0000000000002H"`, value(1), zero,
 			"jsonduration truncates exactly, encoding/json/v2 rounds through float64",
+		},
+		{
+			jsonduration.ISO8601, `"-PT0,0000000000002H"`, value(-1), zero,
+			"jsonduration truncates toward zero, encoding/json/v2 rounds through float64, also when negative",
 		},
 		{
 			jsonduration.Units, `".9007199279999999s"`, value(900719928), value(900719927),
