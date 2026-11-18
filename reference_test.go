@@ -87,11 +87,12 @@ func referenceUnits(s string) (time.Duration, error) {
 }
 
 // referenceISO8601Syntax matches the shape of the ISO 8601 profile: every component may have a fraction here, and
-// referenceISO8601 then checks which ones may.
-var referenceISO8601Syntax = regexp.MustCompile(`(?i)^([-+]?)P` +
-	`(?:(\d+)(?:[.,](\d+))?Y)?(?:(\d+)(?:[.,](\d+))?M)?` +
-	`(?:(\d+)(?:[.,](\d+))?W)?(?:(\d+)(?:[.,](\d+))?D)?` +
-	`(T(?:(\d+)(?:[.,](\d+))?H)?(?:(\d+)(?:[.,](\d+))?M)?(?:(\d+)(?:[.,](\d+))?S)?)?$`)
+// referenceISO8601 then checks which ones may. The letters are spelled out in both cases rather than with (?i), which
+// also folds non-ASCII letters such as ſ into s.
+var referenceISO8601Syntax = regexp.MustCompile(`^([-+]?)[Pp]` +
+	`(?:(\d+)(?:[.,](\d+))?[Yy])?(?:(\d+)(?:[.,](\d+))?[Mm])?` +
+	`(?:(\d+)(?:[.,](\d+))?[Ww])?(?:(\d+)(?:[.,](\d+))?[Dd])?` +
+	`([Tt](?:(\d+)(?:[.,](\d+))?[Hh])?(?:(\d+)(?:[.,](\d+))?[Mm])?(?:(\d+)(?:[.,](\d+))?[Ss])?)?$`)
 
 func referenceISO8601(s string, acceptDays bool) (time.Duration, error) {
 	m := referenceISO8601Syntax.FindStringSubmatchIndex(s)
