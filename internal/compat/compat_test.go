@@ -164,36 +164,42 @@ func FuzzUnmarshalMatchesFormatTag(f *testing.F) {
 }
 
 var (
-	// A negative number that truncates to zero, such as -0 or -0.0000000001, possibly quoted.
-	negativeZero = regexp.MustCompile(`^"?-0(\.0*\d*)?"?$`)
+	// A negative number that truncates to zero, such as -0 or -0.0000000001.
+	negativeZero = regexp.MustCompile(`^-0(\.0*\d*)?$`)
 
 	// A fraction that starts with e or E, as in "PT1.e5H".
 	fractionStartingWithE = regexp.MustCompile(`[.,][eE]`)
 
 	// Calendar units with a count of zero and nothing else before the clock components, as in "P0D" or "P0Y0M0DT1H".
-	onlyZeroCalendarUnits = regexp.MustCompile(`(?i)^"[+-]?P(0+[YMWD])+(T.*)?"$`)
+	onlyZeroCalendarUnits = regexp.MustCompile(`^[+-]?[Pp](0+[YyMmWwDd])+([Tt].*)?$`)
 
 	// A fraction of hours or minutes as the last component, as in "PT1.5H".
-	fractionOfHoursOrMinutes = regexp.MustCompile(`[.,]\d+[HhMm]"$`)
+	fractionOfHoursOrMinutes = regexp.MustCompile(`[.,]\d+[HhMm]$`)
 )
 
 // intendedDifference reports whether jsonduration differs from the tag option on value in one of the ways that
-// TestDifferencesFromFormatTag lists.
+// TestDifferencesFromFormatTag lists. The patterns match a JSON string with its escapes decoded, so that "p0Y"
+// counts as "p0Y", or a JSON number as written.
 func intendedDifference(f jsonduration.Format, value string, want time.Duration, wantErr error,
 	got time.Duration, err error) bool {
 	value = strings.Trim(value, " \t\r\n")
+	text := value
+	var s string
+	if json.Unmarshal([]byte(value), &s) == nil {
+		text = s
+	}
 
 	switch {
 	case f == jsonduration.Units:
 		return roundsFractionsThroughFloat(value, want, wantErr, got, err)
 	case isNumeric(f) && errors.Is(wantErr, strconv.ErrRange) && err == nil && got == 0:
-		return negativeZero.MatchString(value)
+		return negativeZero.MatchString(text)
 	case f == jsonduration.ISO8601 && wantErr == nil && errors.Is(err, strconv.ErrSyntax):
-		return fractionStartingWithE.MatchString(value)
+		return fractionStartingWithE.MatchString(text)
 	case f == jsonduration.ISO8601 && wantErr == nil && err == nil && oneFurtherFromZero(want, got):
-		return fractionOfHoursOrMinutes.MatchString(value)
+		return fractionOfHoursOrMinutes.MatchString(text)
 	case f == jsonduration.ISO8601 && wantErr != nil && err == nil:
-		return onlyZeroCalendarUnits.MatchString(value)
+		return onlyZeroCalendarUnits.MatchString(text)
 	}
 
 	return false
